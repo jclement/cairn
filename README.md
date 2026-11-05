@@ -486,7 +486,5 @@ docs/             DESIGN.md, SELF-HOSTING.md, SECURITY.md, research/
 
 ## Licence
 
-Not chosen yet. The proposal is **MIT**: a short, permissive licence that suits a self-hosted
-tool people are meant to fork. `package.json` already says `MIT`, but no licence is granted until
-a `LICENSE` file is added. Cairn's note format and tool names follow Basic Memory's published
-documentation; it contains no Basic Memory (AGPL) code. owg-css is MIT.
+[MIT](LICENSE) © 2026 Jeff Clement. Cairn's note format and tool behaviour follow Basic Memory's
+published documentation; it contains no Basic Memory (AGPL) code. owg-css is MIT.
