@@ -3,7 +3,7 @@
 
 import type { Context, Hono } from "hono";
 import { deleteAccount } from "../account";
-import { audit, clearSessionCookie, issueRecoveryCodes, remainingRecoveryCodes, type Session } from "../directory";
+import { audit, clearSessionCookie, GUIDE_MAX_BYTES, getGuidance, issueRecoveryCodes, remainingRecoveryCodes, type Session, setGuidance } from "../directory";
 import { importEnabled } from "./importer";
 import { type H, html, icon, when } from "./layout";
 import { safeNext } from "./next";
@@ -70,6 +70,7 @@ export function registerAccount(app: Hono<AppEnv>, page: Page, loginRedirect: (u
       .bind(user.id)
       .all<{ id: string; name: string | null; created_at: string; last_used_at: string | null; device_type: string | null; backed_up: number }>();
     const codes = await remainingRecoveryCodes(c.env, user.id);
+    const guidance = (await getGuidance(c.env, user.id)) ?? "";
     const msg = c.req.query("msg");
     return c.html(
       page(
@@ -99,6 +100,14 @@ export function registerAccount(app: Hono<AppEnv>, page: Page, loginRedirect: (u
           </form>`,
         )}
         ${panel(
+          "Guidance for your assistants",
+          html`Private to you: your assistants see it in <code>projects</code> and <code>help</code>, nobody else does. Say which project each kind of thing belongs in, e.g. “Work and customers → ada/acme; family → main; never put customer data in main.” At most ${GUIDE_MAX_BYTES / 1024} KB.`,
+          html`<form method="post" action="/app/settings/guidance" class="m-0 space-y-3" id="guidance">
+            <label for="guidance-text" class="sr-only">Your guidance</label>
+            <textarea id="guidance-text" name="guidance" rows="6" maxlength="${GUIDE_MAX_BYTES}" placeholder="Work and customers → ada/acme&#10;Family and home → main">${guidance}</textarea>
+            <button class="btn btn-secondary" type="submit">Save guidance</button></form>`,
+        )}
+        ${panel(
           "Recovery codes",
           html`If you lose all your passkeys, go to <a href="/recover">/recover</a>, enter your username and one code. You'll be signed in only to add a new passkey; your other sessions are then signed out. Each code works once.`,
           html`<div class="flex flex-wrap items-center justify-between gap-4">
@@ -120,6 +129,13 @@ export function registerAccount(app: Hono<AppEnv>, page: Page, loginRedirect: (u
         ),
       ),
     );
+  });
+
+  app.post("/app/settings/guidance", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.redirect("/login", 303);
+    const r = await setGuidance(c.env, user.id, String((await c.req.formData()).get("guidance") ?? ""));
+    return c.redirect(`/app/settings/account?msg=${encodeURIComponent(r.ok ? "Guidance saved." : r.message)}#guidance`, 303);
   });
 
   app.post("/app/settings/passkeys/rename", async (c) => {

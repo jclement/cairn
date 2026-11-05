@@ -24,7 +24,8 @@ Don't capture chit-chat, intermediate drafts, things already in a note, or anyth
 
 ## How
 
-Follow `cairn-notes`: search first, extend the note of the thing the fact is about (a person,
+Follow `cairn-notes`: choose the project the user's guidance and the project's guide point to
+(`projects command=list` shows both; a shared project is `owner/name`), search first, extend the note of the thing the fact is about (a person,
 project or decision note), use `[category]` observations and `[[links]]`, and `supersede`
 when a fact changes. Batch several facts into one edit when you can.
 

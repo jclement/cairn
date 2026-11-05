@@ -27,11 +27,47 @@ export interface User {
 export interface Vault {
   id: string;
   owner_id: string;
+  /**
+   * From getVault/listVaults: the name the CALLER uses for the project (its label): the plain
+   * name for its owner, "<owner>/<name>" for a member. From a raw `SELECT * FROM vaults`: the
+   * plain name. Never use it as the Durable Object's name: vaultRef() takes `slug` for that.
+   */
   name: string;
   is_default: number;
   bytes_used: number;
   note_count: number;
   created_at: string;
+  /** Set by getVault/listVaults: the caller's role on this project. */
+  role?: Role;
+  /** Set by getVault/listVaults: the plain name in the owner's namespace. */
+  slug?: string;
+  /** Set by getVault/listVaults: the owner's username. */
+  owner_username?: string;
+  /** Set by getVault/listVaults: who is acting (charged for AI and search limits). */
+  actor_id?: string;
+  /** The project's guide for assistants (markdown, <= GUIDE_MAX_BYTES), and who last changed it. */
+  guide?: string | null;
+  guide_updated_by?: string | null;
+  guide_updated_at?: string | null;
+  /** Set by getVault/listVaults: the username of who last changed the guide. */
+  guide_editor?: string | null;
+}
+
+/** A project's member roles. The owner is vaults.owner_id; editors write; readers only read. */
+export type Role = "owner" | "editor" | "reader";
+export type MemberRole = Exclude<Role, "owner">;
+export const MEMBER_ROLES: readonly MemberRole[] = ["editor", "reader"];
+const RANK: Record<Role, number> = { reader: 1, editor: 2, owner: 3 };
+
+/** True if `v` (from getVault/listVaults) lets its caller change notes and files. */
+export function canWriteVault(v: Vault): boolean {
+  return v.role === "owner" || v.role === "editor";
+}
+export function isOwner(v: Vault): boolean {
+  return v.role === "owner";
+}
+export function roleAtLeast(role: Role | undefined, min: Role): boolean {
+  return !!role && RANK[role] >= RANK[min];
 }
 
 export const now = () => new Date().toISOString();
@@ -69,7 +105,12 @@ export type CreateUserResult = { ok: true; user: User } | { ok: false; reason: "
  * claimed in the same transaction and the user row is only inserted if this call won the claim,
  * so a single-use invite can never admit two accounts.
  */
-export async function createUser(env: Env, username: string, isAdmin: boolean, opts: { inviteCode?: string } = {}): Promise<CreateUserResult> {
+export async function createUser(
+  env: Env,
+  username: string,
+  isAdmin: boolean,
+  opts: { inviteCode?: string; shareCode?: string } = {},
+): Promise<CreateUserResult> {
   const id = newId();
   const ts = now();
   const vaultId = newId();
@@ -89,6 +130,27 @@ export async function createUser(env: Env, username: string, isAdmin: boolean, o
         `INSERT INTO users (id, username, is_admin, created_at, invited_by)
          SELECT ?, ?, ?, ?, created_by FROM invites WHERE code_hash = ? AND used_by = ?`,
       ).bind(id, name, isAdmin ? 1 : 0, ts, inviteHash, id),
+    );
+  } else if (opts.shareCode) {
+    // A share link acts as an invite: the link's sign-up slot (at most SHARE_LIMITS.signupsPerLink
+    // accounts per link), the account and its membership are one transaction.
+    const shareH = await sha256Hex(`share:${opts.shareCode}`);
+    stmts.push(
+      env.DB.prepare(
+        `UPDATE share_links SET uses = uses + 1, signups = signups + 1, last_token = ?1
+         WHERE code_hash = ?2 AND revoked_at IS NULL AND expires_at > ?3 AND (single_use = 0 OR uses = 0) AND signups < ?4
+           AND (SELECT COUNT(*) FROM vault_members WHERE vault_id = share_links.vault_id) < ?5
+           AND EXISTS (SELECT 1 FROM vaults v JOIN users u ON u.id = v.owner_id
+                       WHERE v.id = share_links.vault_id AND u.disabled_at IS NULL AND u.deleting_at IS NULL)`,
+      ).bind(id, shareH, ts, SHARE_LIMITS.signupsPerLink, SHARE_LIMITS.membersPerVault),
+      env.DB.prepare(
+        `INSERT INTO users (id, username, is_admin, created_at, invited_by)
+         SELECT ?, ?, ?, ?, created_by FROM share_links WHERE code_hash = ? AND last_token = ?`,
+      ).bind(id, name, isAdmin ? 1 : 0, ts, shareH, id),
+      env.DB.prepare(
+        `INSERT INTO vault_members (vault_id, user_id, role, added_by, added_at)
+         SELECT vault_id, ?1, role, created_by, ?2 FROM share_links WHERE code_hash = ?3 AND last_token = ?1`,
+      ).bind(id, ts, shareH),
     );
   } else {
     stmts.push(env.DB.prepare("INSERT INTO users (id, username, is_admin, created_at) VALUES (?, ?, ?, ?)").bind(id, name, isAdmin ? 1 : 0, ts));
@@ -110,17 +172,74 @@ export async function createUser(env: Env, username: string, isAdmin: boolean, o
 
 // ---------- vaults ----------
 
+/** Columns every access query selects: the vault row, its owner's username and the caller's role. */
+const ACCESS_COLUMNS = `v.*, u.username AS owner_username,
+  (SELECT username FROM users WHERE id = v.guide_updated_by) AS guide_editor,
+  CASE WHEN v.owner_id = ?1 THEN 'owner' ELSE m.role END AS role`;
+const ACCESS_FROM = `FROM vaults v JOIN users u ON u.id = v.owner_id
+  LEFT JOIN vault_members m ON m.vault_id = v.id AND m.user_id = ?1`;
+/** A member sees a project only while its owner's account is live (not disabled, not being deleted). */
+const ACCESS_WHERE = `(v.owner_id = ?1 OR (m.user_id IS NOT NULL AND u.disabled_at IS NULL AND u.deleting_at IS NULL))`;
+
+function labelled(userId: string, row: Vault & { owner_username: string; role: Role }): Vault {
+  const slug = row.name;
+  return {
+    ...row,
+    slug,
+    actor_id: userId,
+    // Members address a shared project as owner/name, so it never collides with their own.
+    name: row.owner_id === userId ? slug : `${row.owner_username}/${slug}`,
+    // A shared project is never the member's default.
+    is_default: row.owner_id === userId ? row.is_default : 0,
+  };
+}
+
+/** Every project the user can open: their own (default first), then those shared with them. */
 export async function listVaults(env: Env, userId: string): Promise<Vault[]> {
+  const r = await env.DB.prepare(
+    `SELECT ${ACCESS_COLUMNS} ${ACCESS_FROM} WHERE ${ACCESS_WHERE}
+     ORDER BY (v.owner_id = ?1) DESC, v.is_default DESC, u.username, v.name`,
+  )
+    .bind(userId)
+    .all<Vault & { owner_username: string; role: Role }>();
+  return r.results.map((row) => labelled(userId, row));
+}
+
+/** Only the projects the user owns (account deletion, "download everything", counts). */
+export async function listOwnedVaults(env: Env, userId: string): Promise<Vault[]> {
   const r = await env.DB.prepare("SELECT * FROM vaults WHERE owner_id = ? ORDER BY is_default DESC, name").bind(userId).all<Vault>();
   return r.results;
 }
 
-/** The access check. Returns the vault only if `userId` owns it. `name` omitted = default vault. */
+/**
+ * The access check, and the only way a user-facing path gets a vault. `name` omitted = the user's
+ * default project. A plain name is one of the user's own projects; "owner/name" is a project of
+ * that owner the user owns or is a member of. Anything else is null, exactly as a project that
+ * doesn't exist (no existence leak). Membership is read on every call: never cached.
+ */
 export async function getVault(env: Env, userId: string, name?: string | null): Promise<Vault | null> {
-  if (!name) return env.DB.prepare("SELECT * FROM vaults WHERE owner_id = ? AND is_default = 1").bind(userId).first<Vault>();
-  return env.DB.prepare("SELECT * FROM vaults WHERE owner_id = ? AND name = ?")
-    .bind(userId, slugify(name) || name)
-    .first<Vault>();
+  let row: (Vault & { owner_username: string; role: Role }) | null;
+  if (!name) {
+    row = await env.DB.prepare(`SELECT ${ACCESS_COLUMNS} ${ACCESS_FROM} WHERE v.owner_id = ?1 AND v.is_default = 1`)
+      .bind(userId)
+      .first<Vault & { owner_username: string; role: Role }>();
+  } else {
+    const raw = name.trim();
+    const slash = raw.indexOf("/");
+    if (slash < 0) {
+      row = await env.DB.prepare(`SELECT ${ACCESS_COLUMNS} ${ACCESS_FROM} WHERE v.owner_id = ?1 AND v.name = ?2`)
+        .bind(userId, slugify(raw) || raw)
+        .first<Vault & { owner_username: string; role: Role }>();
+    } else {
+      const owner = normaliseUsername(raw.slice(0, slash));
+      const vname = raw.slice(slash + 1);
+      if (!owner || !vname || vname.includes("/")) return null;
+      row = await env.DB.prepare(`SELECT ${ACCESS_COLUMNS} ${ACCESS_FROM} WHERE u.username = ?2 AND v.name = ?3 AND ${ACCESS_WHERE}`)
+        .bind(userId, owner, slugify(vname) || vname)
+        .first<Vault & { owner_username: string; role: Role }>();
+    }
+  }
+  return row?.role ? labelled(userId, row) : null;
 }
 
 export async function createVault(env: Env, userId: string, name: string): Promise<{ ok: true; vault: Vault } | { ok: false; message: string }> {
@@ -152,13 +271,261 @@ export function vaultStub(env: Env, vault: Vault) {
 }
 
 export function vaultRef(vault: Vault): VaultRef {
-  return { id: vault.id, name: vault.name, ownerId: vault.owner_id };
+  // The Durable Object knows a project by its owner's plain name, whoever is asking.
+  return { id: vault.id, name: vault.slug ?? vault.name, ownerId: vault.owner_id, ...(vault.actor_id ? { actorId: vault.actor_id } : {}) };
 }
 
 /** Bytes charged to a user: live notes plus retained revisions, across all their vaults. */
 export async function userBytes(env: Env, userId: string): Promise<number> {
   const r = await env.DB.prepare("SELECT bytes_used FROM users WHERE id = ?").bind(userId).first<{ bytes_used: number }>();
   return r?.bytes_used ?? 0;
+}
+
+// ---------- sharing: members and share links ----------
+
+/** Most members per project, and most open share links per project. */
+export const SHARE_LIMITS = { membersPerVault: 50, openLinksPerVault: 20, signupsPerLink: 10, maxDays: 30, defaultDays: 7 };
+
+export interface MemberRow {
+  user_id: string;
+  username: string;
+  role: MemberRole;
+  added_at: string;
+  added_by_username: string | null;
+}
+
+export async function listMembers(env: Env, vaultId: string): Promise<MemberRow[]> {
+  const r = await env.DB.prepare(
+    `SELECT m.user_id, u.username, m.role, m.added_at, a.username AS added_by_username
+     FROM vault_members m JOIN users u ON u.id = m.user_id LEFT JOIN users a ON a.id = m.added_by
+     WHERE m.vault_id = ? ORDER BY u.username`,
+  )
+    .bind(vaultId)
+    .all<MemberRow>();
+  return r.results;
+}
+
+/** Change a member's role (owner action). False if they aren't a member. */
+export async function setMemberRole(env: Env, vaultId: string, userId: string, role: MemberRole): Promise<boolean> {
+  if (!MEMBER_ROLES.includes(role)) return false;
+  const r = await env.DB.prepare("UPDATE vault_members SET role = ? WHERE vault_id = ? AND user_id = ?").bind(role, vaultId, userId).run();
+  return (r.meta.changes ?? 0) > 0;
+}
+
+/** Remove a member (owner action, or the member leaving). Takes effect on their next request. */
+export async function removeMember(env: Env, vaultId: string, userId: string): Promise<boolean> {
+  const r = await env.DB.prepare("DELETE FROM vault_members WHERE vault_id = ? AND user_id = ?").bind(vaultId, userId).run();
+  return (r.meta.changes ?? 0) > 0;
+}
+
+export interface ShareLinkRow {
+  id: string;
+  role: MemberRole;
+  created_at: string;
+  expires_at: string;
+  single_use: number;
+  uses: number;
+  signups: number;
+  revoked_at: string | null;
+}
+
+export function shareLinkStatus(l: Pick<ShareLinkRow, "revoked_at" | "expires_at" | "single_use" | "uses">): "open" | "revoked" | "expired" | "used" {
+  if (l.revoked_at) return "revoked";
+  if (Date.parse(l.expires_at) <= Date.now()) return "expired";
+  if (l.single_use && l.uses > 0) return "used";
+  return "open";
+}
+
+const shareHash = (code: string) => sha256Hex(`share:${code}`);
+
+/**
+ * Create a share link for a project the caller owns. Only the hash of the code is stored: the
+ * returned code is shown once. At most SHARE_LIMITS.openLinksPerVault open links per project.
+ */
+export async function createShareLink(
+  env: Env,
+  vault: Vault,
+  creatorId: string,
+  opts: { role: MemberRole; days?: number; singleUse?: boolean },
+): Promise<{ ok: true; code: string; id: string; expires_at: string } | { ok: false; message: string }> {
+  if (vault.owner_id !== creatorId) return { ok: false, message: "Only the project's owner can share it." };
+  if (!MEMBER_ROLES.includes(opts.role)) return { ok: false, message: "A link gives editor or reader access." };
+  const days = Math.min(Math.max(Math.round(Number.isFinite(opts.days) ? (opts.days as number) : SHARE_LIMITS.defaultDays), 1), SHARE_LIMITS.maxDays);
+  const code = randomToken(18);
+  const id = newId();
+  const ts = now();
+  const expires = new Date(Date.now() + days * 86400e3).toISOString();
+  const r = await env.DB.prepare(
+    `INSERT INTO share_links (id, vault_id, code_hash, role, created_by, created_at, expires_at, single_use)
+     SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
+     WHERE (SELECT COUNT(*) FROM share_links WHERE vault_id = ?2 AND revoked_at IS NULL AND expires_at > ?6 AND (single_use = 0 OR uses = 0)) < ?9
+       AND EXISTS (SELECT 1 FROM vaults WHERE id = ?2 AND owner_id = ?5)`,
+  )
+    .bind(id, vault.id, await shareHash(code), opts.role, creatorId, ts, expires, opts.singleUse ? 1 : 0, SHARE_LIMITS.openLinksPerVault)
+    .run();
+  if (!(r.meta.changes ?? 0)) return { ok: false, message: `This project already has ${SHARE_LIMITS.openLinksPerVault} open links. Revoke one first.` };
+  // Keep the newest 50 closed links per project for the list; older ones are only noise.
+  await env.DB.prepare(
+    `DELETE FROM share_links WHERE vault_id = ?1 AND id NOT IN (SELECT id FROM share_links WHERE vault_id = ?1 ORDER BY created_at DESC LIMIT 70)
+       AND NOT (revoked_at IS NULL AND expires_at > ?2 AND (single_use = 0 OR uses = 0))`,
+  )
+    .bind(vault.id, ts)
+    .run();
+  return { ok: true, code, id, expires_at: expires };
+}
+
+export async function listShareLinks(env: Env, vaultId: string): Promise<ShareLinkRow[]> {
+  const r = await env.DB.prepare(
+    "SELECT id, role, created_at, expires_at, single_use, uses, signups, revoked_at FROM share_links WHERE vault_id = ? ORDER BY created_at DESC LIMIT 70",
+  )
+    .bind(vaultId)
+    .all<ShareLinkRow>();
+  return r.results;
+}
+
+export async function revokeShareLink(env: Env, vaultId: string, id: string): Promise<boolean> {
+  const r = await env.DB.prepare("UPDATE share_links SET revoked_at = ? WHERE id = ? AND vault_id = ? AND revoked_at IS NULL").bind(now(), id, vaultId).run();
+  return (r.meta.changes ?? 0) > 0;
+}
+
+export interface ShareInvite {
+  linkId: string;
+  vaultId: string;
+  ownerId: string;
+  /** owner/name: how a member addresses the project. */
+  label: string;
+  role: MemberRole;
+  /** New accounts may still be created through this link. */
+  signupOpen: boolean;
+}
+
+/**
+ * A live share link by its code: not revoked, not expired, not a used single-use link, and its
+ * project's owner still active. Everything else is null, all alike.
+ */
+export async function lookupShareLink(env: Env, code: string | undefined | null): Promise<ShareInvite | null> {
+  if (!code || code.length > 64) return null;
+  const r = await env.DB.prepare(
+    `SELECT l.id, l.vault_id, l.role, l.signups, v.owner_id, v.name, u.username
+     FROM share_links l JOIN vaults v ON v.id = l.vault_id JOIN users u ON u.id = v.owner_id
+     WHERE l.code_hash = ?1 AND l.revoked_at IS NULL AND l.expires_at > ?2 AND (l.single_use = 0 OR l.uses = 0)
+       AND u.disabled_at IS NULL AND u.deleting_at IS NULL`,
+  )
+    .bind(await shareHash(code), now())
+    .first<{ id: string; vault_id: string; role: MemberRole; signups: number; owner_id: string; name: string; username: string }>();
+  if (!r) return null;
+  return {
+    linkId: r.id,
+    vaultId: r.vault_id,
+    ownerId: r.owner_id,
+    label: `${r.username}/${r.name}`,
+    role: r.role,
+    signupOpen: r.signups < SHARE_LIMITS.signupsPerLink,
+  };
+}
+
+export type RedeemResult = { ok: true; role: MemberRole; vaultId: string; label: string } | { ok: false; reason: "invalid" | "owner" | "full" | "lower" };
+
+/**
+ * Join a project through a share link (or raise one's role to the link's). One D1 transaction:
+ * the link's use is counted only if it was still live (single use: once), and the membership is
+ * written only if that use was this call's. A link never lowers an existing role ("lower").
+ */
+export async function redeemShareLink(env: Env, code: string, userId: string): Promise<RedeemResult> {
+  const link = await lookupShareLink(env, code);
+  if (!link) return { ok: false, reason: "invalid" };
+  if (link.ownerId === userId) return { ok: false, reason: "owner" };
+  const current = await env.DB.prepare("SELECT role FROM vault_members WHERE vault_id = ? AND user_id = ?")
+    .bind(link.vaultId, userId)
+    .first<{ role: MemberRole }>();
+  if (current && RANK[current.role] >= RANK[link.role]) return { ok: false, reason: "lower" };
+  const token = crypto.randomUUID();
+  const ts = now();
+  const res = await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE share_links SET uses = uses + 1, last_token = ?1
+       WHERE id = ?2 AND revoked_at IS NULL AND expires_at > ?3 AND (single_use = 0 OR uses = 0)
+         AND (EXISTS (SELECT 1 FROM vault_members WHERE vault_id = ?4 AND user_id = ?5)
+              OR (SELECT COUNT(*) FROM vault_members WHERE vault_id = ?4) < ?6)`,
+    ).bind(token, link.linkId, ts, link.vaultId, userId, SHARE_LIMITS.membersPerVault),
+    env.DB.prepare(
+      `INSERT INTO vault_members (vault_id, user_id, role, added_by, added_at)
+       SELECT vault_id, ?1, role, created_by, ?2 FROM share_links WHERE id = ?3 AND last_token = ?4
+       ON CONFLICT (vault_id, user_id) DO UPDATE SET role = CASE WHEN excluded.role = 'editor' THEN 'editor' ELSE vault_members.role END`,
+    ).bind(userId, ts, link.linkId, token),
+    env.DB.prepare("SELECT last_token FROM share_links WHERE id = ?").bind(link.linkId),
+  ]);
+  if ((res[2].results as { last_token: string | null }[])[0]?.last_token !== token) {
+    const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM vault_members WHERE vault_id = ?").bind(link.vaultId).first<{ n: number }>();
+    return { ok: false, reason: (count?.n ?? 0) >= SHARE_LIMITS.membersPerVault ? "full" : "invalid" };
+  }
+  return { ok: true, role: link.role, vaultId: link.vaultId, label: link.label };
+}
+
+// ---------- guidance: project guides and personal guidance ----------
+
+/** Most bytes in a project's guide or a user's personal guidance. */
+export const GUIDE_MAX_BYTES = 4096;
+
+const guideBytes = (t: string) => new TextEncoder().encode(t).length;
+
+/** Starter guides offered when a project is created. */
+export const GUIDE_TEMPLATES: Record<string, { label: string; text: string }> = {
+  blank: { label: "No guide", text: "" },
+  personal: {
+    label: "Personal",
+    text: `Personal notes: people, places, plans, health, home and family.
+
+- Belongs here: anything about my own life.
+- Not here: work, customers or colleagues' information.
+- Folders: people/, places/, plans/, journal/. One note per person or place.
+- Tags: lower-case, singular (#trip, #health).`,
+  },
+  team: {
+    label: "Team / work",
+    text: `Shared work notes for the team.
+
+- Belongs here: customers, projects, decisions, meetings, how-tos for this team's work.
+- Not here: anything personal, credentials or secrets of any kind.
+- Folders: customers/, projects/, decisions/, meetings/YYYY/. Title meetings "YYYY-MM-DD Topic".
+- Record decisions as \`- [decision] …\` observations with the reason, and link the people involved.`,
+  },
+};
+
+/** The first meaningful line of a guide (for listings), at most 140 characters. */
+export function guideSummary(guide: string | null | undefined): string | null {
+  const line = (guide ?? "")
+    .split("\n")
+    .map((l) => l.replace(/^#+\s*/, "").trim())
+    .find(Boolean);
+  if (!line) return null;
+  return line.length > 140 ? `${line.slice(0, 139)}…` : line;
+}
+
+/** Set a project's guide. Owner or editor only; empty clears it. */
+export async function setVaultGuide(env: Env, vault: Vault, userId: string, text: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (!canWriteVault(vault)) return { ok: false, message: "Only the project's owner and editors can change its guide." };
+  const t = text.replace(/\r\n/g, "\n").trim();
+  if (guideBytes(t) > GUIDE_MAX_BYTES) return { ok: false, message: `A guide is at most ${GUIDE_MAX_BYTES / 1024} KB.` };
+  await env.DB.prepare("UPDATE vaults SET guide = ?, guide_updated_by = ?, guide_updated_at = ? WHERE id = ?")
+    .bind(t || null, userId, now(), vault.id)
+    .run();
+  return { ok: true };
+}
+
+/** A user's private guidance (cross-project routing rules). Only ever read for that user. */
+export async function getGuidance(env: Env, userId: string): Promise<string | null> {
+  const r = await env.DB.prepare("SELECT guidance FROM users WHERE id = ?").bind(userId).first<{ guidance: string | null }>();
+  return r?.guidance || null;
+}
+
+export async function setGuidance(env: Env, userId: string, text: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  const t = text.replace(/\r\n/g, "\n").trim();
+  if (guideBytes(t) > GUIDE_MAX_BYTES) return { ok: false, message: `Personal guidance is at most ${GUIDE_MAX_BYTES / 1024} KB.` };
+  await env.DB.prepare("UPDATE users SET guidance = ? WHERE id = ?")
+    .bind(t || null, userId)
+    .run();
+  return { ok: true };
 }
 
 // ---------- sessions ----------

@@ -129,7 +129,7 @@ read_note / edit_note section names a heading: "Decisions", "Auth/Decisions" (un
 ## memory:// URLs
 memory://<permalink>, memory://<folder>/<file>.md, memory://<title>; patterns for build_context:
 memory://specs/*, memory://SPEC-24* (case-insensitive). A memory://<project>/... prefix naming the
-current project is accepted.
+current project is accepted (in a project shared with the user, its plain name: memory://barreleye/...).
 `,
   },
   "cairn(7)": {
@@ -149,6 +149,9 @@ also registers the bm_* names) on Cloudflare, multi-user, with these differences
 - Superseding: supersede replaces a fact and keeps the old one under "## Superseded" with an
   @effective[start,end) range; search_notes as_of=YYYY-MM-DD searches memory as it was then.
 - project is optional (the user's default project); Basic Memory requires it. Passing it is fine.
+- Shared projects: a project someone shared with the user is named owner/name (project="jeff/barreleye");
+  readers can't write there (FORBIDDEN). projects command=list shows each project's role and the first
+  line of its guide, after the user's own guidance; projects command=guide reads a whole guide.
 - Unsupported parameters are refused (INVALID) rather than ignored.
 - Schemas: check_schema validates, infers and diffs Picoschema note schemas as Basic Memory does; a
   field may also be satisfied by a frontmatter key of the same name (Basic Memory reads only

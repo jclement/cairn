@@ -3,7 +3,19 @@
 // every POST here has already passed the same-origin check.
 
 import type { Context, Hono } from "hono";
-import { createSession, createUser, getUserByName, getVault, listVaults, sessionCookie, type User, type Vault, vaultRef, vaultStub } from "../../directory";
+import {
+  canWriteVault,
+  createSession,
+  createUser,
+  getUserByName,
+  getVault,
+  listVaults,
+  sessionCookie,
+  type User,
+  type Vault,
+  vaultRef,
+  vaultStub,
+} from "../../directory";
 import type { Caller } from "../../env";
 import { setFrontmatter, splitFrontmatter } from "../../markdown/parse";
 import type { SearchArgs } from "../../vault/do";
@@ -29,6 +41,9 @@ export function registerViewer(app: Hono<AppEnv>) {
     return c.redirect(`/login?next=${encodeURIComponent(u.pathname + u.search)}`);
   };
   const unauthorized = (c: C) => c.json({ error: "Sign in first." }, 401);
+  const READ_ONLY = "You have read-only access to this project (reader).";
+  const readOnlyPage = (c: C, v: Vault) =>
+    c.html(page(c, "Read only", html`<h1>Read only</h1><p class="error">${READ_ONLY} Ask its owner for editor access.</p>`, { vault: v.name }), 403);
 
   /** The named project (vault) if the user has it; else their default; null if named but not theirs. */
   async function pickVault(c: C, user: User, name: string | undefined): Promise<{ vault: Vault | null; vaults: Vault[] }> {
@@ -341,6 +356,7 @@ export function registerViewer(app: Hono<AppEnv>) {
     if (!user) return loginRedirect(c);
     const { vault: v } = await pickVault(c, user, c.req.query("project") ?? c.req.query("v"));
     if (!v) return c.html(page(c, "New note", html`<p class="error">No such project.</p>`), 404);
+    if (!canWriteVault(v)) return readOnlyPage(c, v);
     return editorPage(c, v, { title: clip(c.req.query("title")), folder: clip(c.req.query("folder"), 300), content: "", checksum: "" });
   });
 
@@ -349,6 +365,7 @@ export function registerViewer(app: Hono<AppEnv>) {
     if (!user) return loginRedirect(c);
     const v = await getVault(c.env, user.id, decodeURIComponent(c.req.param("vault")));
     if (!v) return c.html(page(c, "Not found", html`<h1>Not found</h1>`), 404);
+    if (!canWriteVault(v)) return readOnlyPage(c, v);
     const marker = "/edit/";
     const permalink = c.req.path
       .slice(c.req.path.indexOf(marker) + marker.length)
@@ -372,11 +389,12 @@ export function registerViewer(app: Hono<AppEnv>) {
 
   type SaveOutcome =
     | { ok: true; status: 200 | 201; body: Record<string, unknown> }
-    | { ok: false; status: 400 | 401 | 404 | 409 | 413 | 429; body: Record<string, unknown> };
+    | { ok: false; status: 400 | 401 | 403 | 404 | 409 | 413 | 429; body: Record<string, unknown> };
 
   async function save(c: C, user: User, input: SaveInput): Promise<SaveOutcome> {
     const { vault: v } = await pickVault(c, user, input.project || undefined);
     if (!v) return { ok: false, status: 404, body: { error: "No such project.", code: "NOT_FOUND" } };
+    if (!canWriteVault(v)) return { ok: false, status: 403, body: { error: READ_ONLY, code: "FORBIDDEN" } };
     if (typeof input.content !== "string") return { ok: false, status: 400, body: { error: "content is required.", code: "INVALID" } };
     if (await writeLimited(c, user)) return { ok: false, status: 429, body: { error: "Too many writes. Wait a minute.", code: "RATE_LIMITED" } };
     const stub = vaultStub(c.env, v);
@@ -460,6 +478,7 @@ export function registerViewer(app: Hono<AppEnv>) {
     const input = (await c.req.json().catch(() => ({}))) as SaveInput;
     const { vault: v } = await pickVault(c, user, input.project || undefined);
     if (!v || !input.permalink) return c.json({ error: "No such note.", code: "NOT_FOUND" }, 404);
+    if (!canWriteVault(v)) return c.json({ error: READ_ONLY, code: "FORBIDDEN" }, 403);
     if (await writeLimited(c, user)) return c.json({ error: "Too many writes. Wait a minute.", code: "RATE_LIMITED" }, 429);
     // Deletes are always checksum-guarded: without the revision the user saw, refuse.
     if (!input.expected_checksum) return c.json({ error: "Reload the note before deleting it (no revision given).", code: "REVISION_CONFLICT" }, 409);
@@ -488,6 +507,7 @@ export function registerViewer(app: Hono<AppEnv>) {
     if (out.ok) return c.redirect(String(out.body.href), 303);
     const { vault: v } = await pickVault(c, user, input.project || undefined);
     if (!v) return c.html(page(c, "Error", html`<p class="error">${String(out.body.error)}</p>`), 404);
+    if (!canWriteVault(v)) return readOnlyPage(c, v);
     const cur = out.body.current as { content: string; checksum: string } | null | undefined;
     return editorPage(c, v, {
       permalink: input.permalink || undefined,
@@ -507,6 +527,7 @@ export function registerViewer(app: Hono<AppEnv>) {
     const f = await c.req.formData();
     const { vault: v } = await pickVault(c, user, String(f.get("project") ?? "") || undefined);
     if (!v) return c.html(page(c, "Not found", html`<h1>Not found</h1>`), 404);
+    if (!canWriteVault(v)) return readOnlyPage(c, v);
     if (await writeLimited(c, user))
       return c.html(page(c, "Not deleted", html`<h1>Not deleted</h1><p class="error">Too many writes. Wait a minute.</p>`, { vault: v.name }), 429);
     const expected = String(f.get("expected_checksum") ?? "");

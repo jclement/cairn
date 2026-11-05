@@ -2,7 +2,7 @@
 // project or an Obsidian vault; progress and a skipped-files report.
 
 import type { Context, Hono } from "hono";
-import { getVault, listVaults, type User, vaultRef, vaultStub } from "../directory";
+import { getVault as getAnyVault, isOwner, listVaults, type User, type Vault, vaultRef, vaultStub } from "../directory";
 import type { Caller } from "../env";
 import { IMPORT_LIMITS, startImport } from "../import";
 import { admitWrites } from "../stats/limits";
@@ -13,6 +13,15 @@ import { settingsLayout } from "./ui";
 type Page = (c: never, title: string, body: H, extra?: { vault?: string; q?: string }) => H;
 type C = Context<AppEnv>;
 const webCaller = (user: User): Caller => ({ userId: user.id, username: user.username, client: "web", tool: "web:rederive-permalinks" });
+
+/**
+ * Import and permalink re-derivation are the owner's: they are bulk changes whose staging is
+ * accounted to the owner's import reservation. A shared project is "not found" here for members.
+ */
+async function getVault(env: AppEnv["Bindings"], userId: string, name?: string): Promise<Vault | null> {
+  const v = await getAnyVault(env, userId, name);
+  return v && isOwner(v) ? v : null;
+}
 
 /** One upload costs one write from the per-user limiter; the notes inside don't. */
 async function uploadLimited(c: C, user: User) {
@@ -51,7 +60,7 @@ export function registerImport(app: Hono<AppEnv>, page: Page, loginRedirect: (ur
     const user = c.get("user");
     if (!user) return c.redirect(loginRedirect(c.req.url));
     const jobId = c.req.query("job");
-    const vaults = await listVaults(c.env, user.id);
+    const vaults = (await listVaults(c.env, user.id)).filter(isOwner);
     if (jobId) {
       const v = await getVault(c.env, user.id, c.req.query("project") || undefined);
       const st = v ? await vaultStub(c.env, v).importStatus(vaultRef(v), jobId) : null;

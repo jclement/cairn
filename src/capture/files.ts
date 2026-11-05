@@ -505,8 +505,9 @@ export async function exportAttachments(
       paths.set(r.id, p);
     }
   }
-  const names = [...new Set([vault.name, encodeURIComponent(vault.name)])].map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-  const re = new RegExp(`/app/files/(?:${names})/([a-z0-9]{12})`, "g");
+  // Any project segment: a note in a shared project may link a file as owner/name or by plain
+  // name, depending on who attached it. Only this project's file ids (in `paths`) are rewritten.
+  const re = /\/app\/files\/[^/\s)"']+\/([a-z0-9]{12})/g;
   return {
     files,
     rewrite: (content, depth) =>

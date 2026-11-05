@@ -82,7 +82,16 @@ export interface VaultRef {
   name: string;
   /** The user charged for this vault's storage. */
   ownerId: string;
+  /**
+   * Who is acting, when it isn't the owner (a member of a shared project): interactive AI (query
+   * embeddings, re-ranking, write hints) and the search rate limit are charged to them. Never
+   * stored: background work (embedding, gardening, digests) stays the owner's.
+   */
+  actorId?: string;
 }
+
+/** The user an interactive call is charged to. */
+const actorOf = (ref: VaultRef) => ref.actorId ?? ref.ownerId;
 
 /** The conventional core-memory index note of every vault. */
 export const INDEX_PERMALINK = "memory/index";
@@ -1046,7 +1055,7 @@ export class VaultDO extends DurableObject<Env> {
   private bind(ref: VaultRef) {
     if (this.purgeState()) throw new Error("This project is being deleted.");
     if (!this.ref || this.ref.id !== ref.id || this.ref.name !== ref.name || this.ref.ownerId !== ref.ownerId) {
-      this.ref = ref;
+      this.ref = { id: ref.id, name: ref.name, ownerId: ref.ownerId };
       this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES ('vault_id', ?), ('vault_name', ?), ('owner_id', ?)", ref.id, ref.name, ref.ownerId);
     }
   }
@@ -1592,7 +1601,7 @@ export class VaultDO extends DurableObject<Env> {
    * Write-time hints: likely duplicates of a new note, and possible contradictions between its
    * new observations and existing ones. Jev judges; code decides what to show. Never edits.
    */
-  private async writeHints(row: NoteRow, newObs: Observation[], isNew: boolean): Promise<WriteHints | undefined> {
+  private async writeHints(row: NoteRow, newObs: Observation[], isNew: boolean, actorId: string): Promise<WriteHints | undefined> {
     if (!jevEnabled(this.jevEnv()) || !this.ref) return undefined;
     if (!isNew && !newObs.length) return undefined;
     const words = [row.title, ...newObs.map((o) => o.content)].join(" ");
@@ -1636,7 +1645,7 @@ export class VaultDO extends DurableObject<Env> {
     );
     if (!req) return undefined;
     const { state, questions } = req;
-    const res = await askJev(this.jevEnv(), { userId: this.ref.ownerId, purpose: "write_hints", state, questions, timeoutMs: JEV.hintsTimeoutMs });
+    const res = await askJev(this.jevEnv(), { userId: actorId, purpose: "write_hints", state, questions, timeoutMs: JEV.hintsTimeoutMs });
     if (!res.ok) return { duplicates: [], conflicts: [], skipped: `write hints unavailable (${res.error})` };
     // Only "yes" answers are shown: in scripts/jev-eval.mjs the "unsure" band added only false
     // alarms (related-but-distinct notes, compatible facts) and no true duplicate or conflict.
@@ -1728,7 +1737,7 @@ export class VaultDO extends DurableObject<Env> {
     const { row, created } = res.value;
     const before = existing ? new Set(parseNote(existing.content, ref.name).observations.map((o) => `${o.category}\u0000${o.content}`)) : new Set<string>();
     const newObs = parseNote(row.content, ref.name).observations.filter((o) => !before.has(`${o.category}\u0000${o.content}`));
-    const hints = await this.writeHints(row, newObs, created);
+    const hints = await this.writeHints(row, newObs, created, caller.userId || ref.ownerId);
     return ok({
       note: rowToInfo(row),
       created,
@@ -1843,7 +1852,7 @@ export class VaultDO extends DurableObject<Env> {
     if (!res.ok) return res;
     const before = new Set(parseNote(existing.content, ref.name).observations.map((o) => `${o.category}\u0000${o.content}`));
     const newObs = parseNote(res.value.row.content, ref.name).observations.filter((o) => !before.has(`${o.category}\u0000${o.content}`));
-    const hints = newObs.length ? await this.writeHints(res.value.row, newObs, false) : undefined;
+    const hints = newObs.length ? await this.writeHints(res.value.row, newObs, false, caller.userId || ref.ownerId) : undefined;
     return ok({
       note: rowToInfo(res.value.row),
       created: false,
@@ -2119,7 +2128,7 @@ export class VaultDO extends DurableObject<Env> {
     }>
   > {
     this.bind(ref);
-    if (this.faults.has("search-limited") || (this.env.RL_SEARCH && !(await this.env.RL_SEARCH.limit({ key: `search:${ref.ownerId}` })).success)) {
+    if (this.faults.has("search-limited") || (this.env.RL_SEARCH && !(await this.env.RL_SEARCH.limit({ key: `search:${actorOf(ref)}` })).success)) {
       return fail("RATE_LIMITED", "Too many searches in the last minute. Wait a moment and retry.");
     }
     const root = normaliseFolder(stripProjectPrefix((args.path ?? "").replace(/^memory:\/\//, ""), ref.name));
@@ -2247,7 +2256,7 @@ export class VaultDO extends DurableObject<Env> {
     >
   > {
     this.bind(ref);
-    if (this.faults.has("search-limited") || (this.env.RL_SEARCH && !(await this.env.RL_SEARCH.limit({ key: `search:${ref.ownerId}` })).success)) {
+    if (this.faults.has("search-limited") || (this.env.RL_SEARCH && !(await this.env.RL_SEARCH.limit({ key: `search:${actorOf(ref)}` })).success)) {
       return fail("RATE_LIMITED", "Too many searches in the last minute. Wait a moment and retry.");
     }
     const threshold = Math.min(Math.max(args.threshold ?? 0.25, 0), 1);
@@ -3866,7 +3875,7 @@ export class VaultDO extends DurableObject<Env> {
   async search(ref: VaultRef, args: SearchArgs): Promise<Result<SearchResult>> {
     this.bind(ref);
     // Per-user search limit (MCP, browser, API): bounds query embeddings and re-ranking work.
-    if (this.faults.has("search-limited") || (this.env.RL_SEARCH && !(await this.env.RL_SEARCH.limit({ key: `search:${ref.ownerId}` })).success)) {
+    if (this.faults.has("search-limited") || (this.env.RL_SEARCH && !(await this.env.RL_SEARCH.limit({ key: `search:${actorOf(ref)}` })).success)) {
       return fail("RATE_LIMITED", "Too many searches in the last minute. Wait a moment and retry.");
     }
     const notes: string[] = [];
@@ -4022,7 +4031,7 @@ export class VaultDO extends DurableObject<Env> {
           try {
             const t0 = Date.now();
             let qv: number[];
-            if (!(await spendAiBudget(this.jevEnv(), ref.ownerId, Math.max(1, Math.ceil(semanticText.length / 4))))) {
+            if (!(await spendAiBudget(this.jevEnv(), actorOf(ref), Math.max(1, Math.ceil(semanticText.length / 4))))) {
               throw new BudgetSkip();
             }
             try {
@@ -4186,7 +4195,7 @@ export class VaultDO extends DurableObject<Env> {
       window.length = req.keys.size;
       const keys = new Map(window.map(({ row }) => [row.id, req.keys.get(row.permalink) as string]));
       const res = await askJev(this.jevEnv(), {
-        userId: ref.ownerId,
+        userId: actorOf(ref),
         purpose: "search_rerank",
         state: req.state,
         questions: req.questions,
@@ -4399,7 +4408,7 @@ export class VaultDO extends DurableObject<Env> {
       // A long pattern is matched note by note: admit it like a search.
       if (
         this.globInCode(pats) &&
-        (this.faults.has("search-limited") || (this.env.RL_SEARCH && !(await this.env.RL_SEARCH.limit({ key: `search:${ref.ownerId}` })).success))
+        (this.faults.has("search-limited") || (this.env.RL_SEARCH && !(await this.env.RL_SEARCH.limit({ key: `search:${actorOf(ref)}` })).success))
       )
         return fail("RATE_LIMITED", "Too many searches in the last minute. Wait a moment and retry.");
       const g = this.globNotes(cols, pats, "updated_at DESC", pageSize + 1, (page - 1) * pageSize);
@@ -4591,7 +4600,7 @@ export class VaultDO extends DurableObject<Env> {
     //    embedding runs stop. A retry after a failure resumes from the recorded stage.
     if (this.purgeState() === "done") return { vectors: 0 };
     this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES ('purging', 'fenced')");
-    this.ref = ref;
+    this.ref = { id: ref.id, name: ref.name, ownerId: ref.ownerId };
     this.fault("purge-fail");
     // 2. Drain work already running: the embedding run (its pending upsert resolves or is skipped)
     //    and write requests in flight (they abort at commit because of the fence).

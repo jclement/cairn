@@ -3,7 +3,7 @@
 
 import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import { purgeVaultAttachments } from "./capture/files";
-import { listVaults, revokeAllGrants, vaultRef, vaultStub } from "./directory";
+import { listOwnedVaults, revokeAllGrants, vaultRef, vaultStub } from "./directory";
 import type { Env } from "./env";
 
 export async function deleteAccount(env: Env, oauth: Pick<OAuthHelpers, "listUserGrants" | "revokeGrant">, userId: string): Promise<void> {
@@ -14,20 +14,27 @@ export async function deleteAccount(env: Env, oauth: Pick<OAuthHelpers, "listUse
     env.DB.prepare("DELETE FROM pats WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM recent_grants WHERE user_id = ?").bind(userId),
   ]);
-  // 2. Every vault: vectors, then the Durable Object's storage, attachments (R2), then its directory row.
-  for (const v of await listVaults(env, userId)) {
+  // 2. Leave every project shared with this account, at once.
+  await env.DB.prepare("DELETE FROM vault_members WHERE user_id = ?").bind(userId).run();
+  // 3. Every vault it owns: vectors, then the Durable Object's storage, attachments (R2), then its
+  //    directory row with its members and share links (members of a deleted project lose access).
+  for (const v of await listOwnedVaults(env, userId)) {
     await vaultStub(env, v).purge(vaultRef(v));
     await purgeVaultAttachments(env, v.id);
     await env.DB.batch([
       env.DB.prepare("DELETE FROM usage_ledger WHERE vault_id = ?").bind(v.id),
+      env.DB.prepare("DELETE FROM vault_members WHERE vault_id = ?").bind(v.id),
+      env.DB.prepare("DELETE FROM share_links WHERE vault_id = ?").bind(v.id),
       env.DB.prepare("DELETE FROM vaults WHERE id = ?").bind(v.id),
     ]);
   }
-  // 3. OAuth grants (all pages).
+  // 4. OAuth grants (all pages).
   await revokeAllGrants(oauth, userId);
-  // 4. Everything else in the directory, then the user row last.
+  // 5. Everything else in the directory, then the user row last.
   await env.DB.batch([
     env.DB.prepare("DELETE FROM invites WHERE created_by = ?").bind(userId),
+    env.DB.prepare("DELETE FROM share_links WHERE created_by = ?").bind(userId),
+    env.DB.prepare("UPDATE vault_members SET added_by = NULL WHERE added_by = ?").bind(userId),
     env.DB.prepare("UPDATE users SET invited_by = NULL WHERE invited_by = ?").bind(userId),
     env.DB.prepare("DELETE FROM stats_daily WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM attachments WHERE user_id = ?").bind(userId),

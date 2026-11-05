@@ -3,7 +3,7 @@
 // Mounted inside createApp(), so the session, CSRF (Origin) and recovery-session middleware apply.
 
 import type { Context, Hono } from "hono";
-import { listVaults, type User, type Vault, vaultRef, vaultStub } from "../directory";
+import { canWriteVault, listVaults, type User, type Vault, vaultRef, vaultStub } from "../directory";
 import { publicOrigin } from "../env";
 import { importEnabled } from "../web/importer";
 import { type H, html, icon, layout, noteHref, raw, when } from "../web/layout";
@@ -28,6 +28,13 @@ export function registerCapture(app: Hono<AppEnv>) {
     const vaults = await listVaults(c.env, user.id);
     if (name) return { vault: vaults.find((v) => v.name === name) ?? null, vaults };
     return { vault: vaults.find((v) => v.is_default) ?? vaults[0] ?? null, vaults };
+  }
+  /** As pickVault, for a change: only projects the user may write (owner or editor) count. */
+  async function pickWritable(c: C, user: User, name: string | undefined | null): Promise<{ vault: Vault | null; vaults: Vault[]; readOnly: boolean }> {
+    const r = await pickVault(c, user, name);
+    const vaults = r.vaults.filter(canWriteVault);
+    if (r.vault && !canWriteVault(r.vault)) return { vault: null, vaults, readOnly: true };
+    return { vault: r.vault, vaults, readOnly: false };
   }
   async function writeLimited(c: C, user: User): Promise<boolean> {
     if (!c.env.RL_WRITE) return false;
@@ -83,7 +90,8 @@ export function registerCapture(app: Hono<AppEnv>) {
     }
     const file = form.get("file");
     if (!file || typeof file === "string") return c.json({ error: "No file.", code: "INVALID" }, 400);
-    const { vault } = await pickVault(c, user, String(form.get("project") ?? "") || undefined);
+    const { vault, readOnly } = await pickWritable(c, user, String(form.get("project") ?? "") || undefined);
+    if (readOnly) return c.json({ error: "You have read-only access to this project.", code: "FORBIDDEN" }, 403);
     if (!vault) return c.json({ error: "No such project.", code: "NOT_FOUND" }, 404);
     const r = await putAttachment(c.env, vault, { bytes: new Uint8Array(await file.arrayBuffer()), name: file.name, mime: file.type, source: "upload" });
     if (!r.ok)
@@ -99,7 +107,7 @@ export function registerCapture(app: Hono<AppEnv>) {
   });
 
   const del = async (c: C, user: User, project: string, id: string) => {
-    const { vault } = await pickVault(c, user, project || undefined);
+    const { vault } = await pickWritable(c, user, project || undefined);
     return vault ? { vault, ok: await deleteAttachment(c.env, vault, id) } : { vault: null, ok: false };
   };
   app.post("/app/api/files/delete", async (c) => {
@@ -145,8 +153,12 @@ export function registerCapture(app: Hono<AppEnv>) {
                 (r) => html`<tr>
                   <td><a class="inline-flex items-center gap-2 font-medium" href="/app/files/${encodeURIComponent(v.name)}/${r.id}">${icon("file", "size-4 shrink-0 text-muted")}${r.name}</a>${r.caption ? html`<br><span class="muted small">${r.caption}</span>` : ""}</td>
                   <td class="small">${r.mime}</td><td class="small">${Math.ceil(r.bytes / 1024)} KB</td><td class="small">${when(r.created_at)} · ${r.source}</td>
-                  <td><form method="post" action="/app/files/delete" class="inline"><input type="hidden" name="project" value="${v.name}"><input type="hidden" name="id" value="${r.id}">
-                    <button class="btn btn-ghost btn-sm text-danger" type="submit" aria-label="Delete ${r.name}">${icon("trash", "size-4")}<span class="max-sm:sr-only">Delete</span></button></form></td></tr>`,
+                  <td>${
+                    canWriteVault(v)
+                      ? html`<form method="post" action="/app/files/delete" class="inline"><input type="hidden" name="project" value="${v.name}"><input type="hidden" name="id" value="${r.id}">
+                    <button class="btn btn-ghost btn-sm text-danger" type="submit" aria-label="Delete ${r.name}">${icon("trash", "size-4")}<span class="max-sm:sr-only">Delete</span></button></form>`
+                      : ""
+                  }</td></tr>`,
               )}</tbody></table>`
             : html`<div class="card">${emptyState("clip", "No files yet.", "Drop or paste files into the editor to attach them to a note. Email attachments land here too.", html`<a class="btn btn-secondary" href="/app/new?project=${encodeURIComponent(v.name)}">${icon("plus", "size-4")}New note</a>`)}</div>`
         }`,
@@ -317,8 +329,12 @@ export function registerCapture(app: Hono<AppEnv>) {
   app.get("/app/clip", async (c) => {
     const user = c.get("user");
     if (!user) return loginRedirect(c);
-    const { vault, vaults } = await pickVault(c, user, c.req.query("project"));
-    if (!vault) return c.html(page(c, "Clip", html`<p class="error">No such project.</p>`), 404);
+    const { vault, vaults, readOnly } = await pickWritable(c, user, c.req.query("project"));
+    if (!vault)
+      return c.html(
+        page(c, "Clip", html`<p class="error">${readOnly ? "You have read-only access to this project." : "No such project."}</p>`),
+        readOnly ? 403 : 404,
+      );
     // Share targets put the link in `text` on many phones; find it.
     const text = (c.req.query("text") ?? "").trim().slice(0, 10_000);
     let url = (c.req.query("url") ?? "").trim().slice(0, 2000);
@@ -362,8 +378,12 @@ export function registerCapture(app: Hono<AppEnv>) {
     if (!user) return c.redirect("/login", 303);
     const form = await c.req.formData();
     const g = (k: string, n = 300) => String(form.get(k) ?? "").slice(0, n);
-    const { vault, vaults } = await pickVault(c, user, g("project", 100) || undefined);
-    if (!vault) return c.html(page(c, "Clip", html`<p class="error">No such project.</p>`), 404);
+    const { vault, vaults, readOnly } = await pickWritable(c, user, g("project", 100) || undefined);
+    if (!vault)
+      return c.html(
+        page(c, "Clip", html`<p class="error">${readOnly ? "You have read-only access to this project." : "No such project."}</p>`),
+        readOnly ? 403 : 404,
+      );
     const url = g("url", 2000).trim();
     const f: ClipForm = {
       project: vault.name,

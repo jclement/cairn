@@ -2,7 +2,7 @@
 // pin toggle, core-memory panel, memory settings.
 
 import type { Hono } from "hono";
-import { getVault, listVaults, type User, type Vault, vaultRef, vaultStub } from "../directory";
+import { canWriteVault, getVault, listVaults, type User, type Vault, vaultRef, vaultStub } from "../directory";
 import { type Caller, DEFAULT_CORE_BUDGET, publicOrigin } from "../env";
 import { diffLines } from "../memory/diff";
 import { admitWrite } from "../stats/limits";
@@ -20,7 +20,14 @@ export const BULK_REVERT_MAX = 50;
 const webCaller = (user: User, tool: string): Caller => ({ userId: user.id, username: user.username, client: "web", tool });
 const fmtDelta = (d: number | null) =>
   d === null ? "" : `${d >= 0 ? "+" : "−"}${Math.abs(d) >= 1024 ? `${(Math.abs(d) / 1024).toFixed(1)} KB` : `${Math.abs(d)} B`}`;
-const who = (client: string | null, username: string | null) => (client === "web" ? `${username ?? "you"} (web)` : (client ?? "?"));
+/**
+ * Who made a change: "ada (web)" on the web; the app's name for an assistant, with the person it
+ * acted for when that isn't the viewer (a shared project: "Claude Code for ada").
+ */
+const who = (client: string | null, username: string | null, viewer?: string) =>
+  client === "web"
+    ? `${username ?? "you"} (web)`
+    : `${client ?? "?"}${username && viewer && username !== viewer && username !== "cairn" ? ` for ${username}` : ""}`;
 const historyHref = (vault: string, permalink: string, rev?: number) => `${noteHref(vault, permalink)}/history${rev ? `?rev=${rev}` : ""}`;
 /** A round icon for a revision's action: create, edit, delete, move, revert… */
 const actionDot = (action: string) => {
@@ -61,8 +68,9 @@ export async function corePanel(env: AppEnv["Bindings"], user: User): Promise<H>
   </section>`;
 }
 
-/** Pin/unpin + history buttons for the note page. */
-export function noteTools(vault: string, permalink: string, pinned: boolean): H {
+/** Pin/unpin + history buttons for the note page (pin only for those who can write). */
+export function noteTools(vault: string, permalink: string, pinned: boolean, canWrite = true): H {
+  if (!canWrite) return html`<a class="btn btn-ghost btn-sm" href="${historyHref(vault, permalink)}">${icon("history", "size-4")}History</a>`;
   return html`<form class="m-0" method="post" action="/app/v/${encodeURIComponent(vault)}/pin">
       <input type="hidden" name="permalink" value="${permalink}"><input type="hidden" name="pin" value="${pinned ? "0" : "1"}">
       <button class="btn btn-secondary btn-sm${pinned ? " text-accent" : ""}" type="submit" title="${pinned ? "Remove from the core memory your assistants load first" : "Add to the core memory your assistants load first"}">${icon("pin", "size-4")}<span class="sm:hidden">${pinned ? "Unpin" : "Pin"}</span><span class="max-sm:sr-only">${pinned ? "Unpin from core memory" : "Pin to core memory"}</span></button>
@@ -156,9 +164,9 @@ export function registerRound3(app: Hono<AppEnv>, page: Page, loginRedirect: (ur
                 <div class="min-w-0 flex-1">
                   <p class="m-0 truncate text-sm"><span class="text-muted">${r.action}</span> <a class="font-medium text-fg" href="${historyHref(v.name, r.permalink, r.id)}">${r.title}</a></p>
                   <p class="m-0 mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted"><span class="truncate font-mono text-faint">${v.name}/${r.permalink}</span>
-                    <span class="sm:hidden">${clientBadge(r.client, who(r.client, r.username))}</span></p>
+                    <span class="sm:hidden">${clientBadge(r.client, who(r.client, r.username, user.username))}</span></p>
                 </div>
-                <div class="hidden shrink-0 items-center gap-2 sm:flex">${clientBadge(r.client, who(r.client, r.username))}${r.tool ? html`<span class="chip font-mono">${r.tool}</span>` : ""}</div>
+                <div class="hidden shrink-0 items-center gap-2 sm:flex">${clientBadge(r.client, who(r.client, r.username, user.username))}${r.tool ? html`<span class="chip font-mono">${r.tool}</span>` : ""}</div>
                 <div class="w-20 shrink-0 text-right"><time class="block text-xs whitespace-nowrap text-muted" datetime="${r.at}" title="${when(r.at)}">${ago(r.at)}</time>${deltaChip(r.delta)}</div></li>`,
               )}</ul>`
             : html`<div class="card">${emptyState("bolt", "No changes yet.", "When you or an assistant saves a note, it shows up here with a diff you can undo.")}</div>`
@@ -180,7 +188,8 @@ export function registerRound3(app: Hono<AppEnv>, page: Page, loginRedirect: (ur
     const since = sinceParam(c.req.query("since"));
     if (!client || !since)
       return c.html(page(c as never, "Undo", html`<p class="error">Pick an app and a start time.</p><p><a href="/app/activity">Back</a></p>`), 400);
-    const vaults = await listVaults(c.env, user.id);
+    // Only projects the user may change (a reader of a shared project can't undo anything there).
+    const vaults = (await listVaults(c.env, user.id)).filter(canWriteVault);
     const plans = await Promise.all(vaults.map(async (v) => ({ v, plan: await vaultStub(c.env, v).planClientRevert(vaultRef(v), client, since) })));
     const any = plans.some((p) => p.plan.length);
     const label: Record<string, string> = {
@@ -244,7 +253,7 @@ export function registerRound3(app: Hono<AppEnv>, page: Page, loginRedirect: (ur
     while (budget < wanted && (await admitWrite(c.env, user.id))) budget++;
     for (const [name, map] of expected) {
       const v = await getVault(c.env, user.id, name);
-      if (!v) continue;
+      if (!v || !canWriteVault(v)) continue;
       const res = await vaultStub(c.env, v).revertClient(vaultRef(v), webCaller(user, "web:revert-client"), client, since, map, budget);
       budget -= res.filter((r) => r.ok || !/^not done yet|^nothing to undo|^earlier text|^not in the confirmed/.test(r.message)).length;
       budget = Math.max(0, budget);
@@ -305,20 +314,24 @@ export function registerRound3(app: Hono<AppEnv>, page: Page, loginRedirect: (ur
             (r) => html`<li class="m-0"><a href="${historyHref(v.name, permalink, r.id)}" ${r.id === revId ? html`aria-current="true"` : ""}
               class="flex items-center gap-3 rounded-xl px-2.5 py-2 text-fg no-underline hover:bg-sunken hover:no-underline aria-[current=true]:bg-accent-soft">
               ${actionDot(r.action)}
-              <span class="min-w-0 flex-1"><span class="block truncate text-sm font-medium">${r.action} · ${who(r.client, r.username)}</span>
+              <span class="min-w-0 flex-1"><span class="block truncate text-sm font-medium">${r.action} · ${who(r.client, r.username, user.username)}</span>
               <span class="block text-xs text-muted">${when(r.at)}</span></span>${deltaChip(r.delta)}</a></li>`,
           )}</ol>
           <div class="min-w-0">
           ${
             d
               ? html`<div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-                  <h2 class="m-0 text-base">${d.rev.action} by ${who(d.rev.client, d.rev.username)} · ${when(d.rev.at)}</h2>
-                  <form method="post" action="/app/v/${encodeURIComponent(v.name)}/revert" class="m-0">
+                  <h2 class="m-0 text-base">${d.rev.action} by ${who(d.rev.client, d.rev.username, user.username)} · ${when(d.rev.at)}</h2>
+                  ${
+                    canWriteVault(v)
+                      ? html`<form method="post" action="/app/v/${encodeURIComponent(v.name)}/revert" class="m-0">
                     <input type="hidden" name="rev" value="${d.rev.id}">
                     <input type="hidden" name="permalink" value="${permalink}">
                     <input type="hidden" name="checksum" value="${h.current?.checksum ?? ""}">
                     <button class="btn btn-danger btn-sm" type="submit">${icon("history", "size-4")}${d.rev.action === "create" ? "Undo: delete this note" : d.rev.action === "delete" ? "Undo: restore this note" : "Undo this change"}</button>
-                  </form>
+                  </form>`
+                      : ""
+                  }
                 </div>
                 ${d.available ? renderDiff(d.before ?? "", d.after ?? "") : html`<p class="callout">The text for this change is no longer retained (history keeps the last 20 copies per note).</p>`}
                 <p class="mt-3 text-xs text-muted">Undo makes a new revision, so you can undo the undo.</p>`
@@ -335,6 +348,7 @@ export function registerRound3(app: Hono<AppEnv>, page: Page, loginRedirect: (ur
     if (!user) return c.redirect("/login", 303);
     const v = await getVault(c.env, user.id, decodeURIComponent(c.req.param("vault")));
     if (!v) return c.text("Not found", 404);
+    if (!canWriteVault(v)) return c.text("You have read-only access to this project.", 403);
     const f = await c.req.formData();
     const permalink = String(f.get("permalink") ?? "");
     if (!(await admitWrite(c.env, user.id))) {
@@ -359,6 +373,7 @@ export function registerRound3(app: Hono<AppEnv>, page: Page, loginRedirect: (ur
     if (!user) return c.redirect("/login", 303);
     const v: Vault | null = await getVault(c.env, user.id, decodeURIComponent(c.req.param("vault")));
     if (!v) return c.text("Not found", 404);
+    if (!canWriteVault(v)) return c.text("You have read-only access to this project.", 403);
     const f = await c.req.formData();
     const permalink = String(f.get("permalink") ?? "");
     const pin = f.get("pin") === "1";

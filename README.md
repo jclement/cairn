@@ -20,7 +20,7 @@ notes database with good manners.)*
 ## Contents
 
 [Features](#features) · [Screenshots](#screenshots) · [Deploy your own](#deploy-your-own) ·
-[Connect Claude](#connect-claude-and-other-assistants) · [Deploy from GitHub Actions](#deploy-from-github-actions) ·
+[Connect Claude](#connect-claude-and-other-assistants) · [Sharing a project](#sharing-a-project) · [Deploy from GitHub Actions](#deploy-from-github-actions) ·
 [Costs and limits](#costs-and-limits) · [Security](#security) · [Backups and export](#backups-and-export) ·
 [Upgrading](#upgrading) · [Troubleshooting](#troubleshooting) · [Development](#development) ·
 [Licence](#licence)
@@ -300,6 +300,38 @@ Set up Cairn for me: read https://cairn.example.com/setup.md and follow it.
 you'll use Cairn. Then it installs the matching skills from `/skills/` in the way that suits your
 client, or gives you the download links on claude.ai. Settings → Connected apps lists every grant
 with a revoke button.
+
+## Sharing a project
+
+Share a project (say, a team's `barreleye`) with colleagues on the same Cairn:
+
+1. Open the project and choose **Share**. Create a link: **editor** (read and write) or
+   **reader** (read only), valid 1–30 days (7 by default), optionally single use. Copy it: only a
+   hash is stored, so it is shown once.
+2. Send it. Whoever opens it signs in, or creates an account with a passkey (the link works as an
+   invite even when sign-up is invite-only, for up to 10 accounts per link), and confirms joining.
+   A link never changes an existing member's role without them confirming it, and never lowers it.
+3. The same page lists members (change a role, remove someone; it takes effect on their next
+   request) and links (with use counts; revoke any). Members can leave.
+
+Members see the project as `owner/name` (`jeff/barreleye`) in the app and for their assistants
+(`project="jeff/barreleye"`), so it never collides with a project of their own; the owner keeps
+calling it `barreleye` (or `jeff/barreleye`). Every change records who made it and with which
+app, shown in the note history and the activity feed.
+
+What stays personal: core memory loads your own default project, the email inbox, recovery codes
+and passkeys are yours, and AI use (search re-ranking, query embeddings, write hints) counts
+against the person acting. Storage counts against the project's owner. "Download everything" holds
+the projects you own; owners and editors can download a shared project. Import into a shared
+project, the nightly gardening checklist and the weekly digest are the owner's. Deleting an
+account removes its memberships; deleting an owner deletes their projects, and members lose them.
+
+**Guidance for assistants.** Each project can have a short guide (what belongs there, its
+folders, tags and naming; owner and editors edit it on the Share page, members read it), and each
+person has private guidance in Settings → Account ("work and customers → jeff/barreleye; family →
+main"). Assistants see both in `projects` (`command=list`; `command=guide` reads a whole guide)
+and `help`, the guide at the top of `build_context` and `recent_activity`, and one line pointing
+at it with every write. New projects can start from a personal or team guide.
 
 ## Deploy from GitHub Actions
 

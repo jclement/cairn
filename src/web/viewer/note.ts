@@ -2,7 +2,7 @@
 // outgoing links, backlinks, local graph, contents). Rendering is inert (see ../render.ts).
 
 import type { Context, Hono } from "hono";
-import { getVault, vaultRef, vaultStub } from "../../directory";
+import { canWriteVault, getVault, vaultRef, vaultStub } from "../../directory";
 import { folderHref, type H, html, icon, layout, noteHref, raw, when } from "../layout";
 import { type RenderInfo, renderMarkdown } from "../render";
 import { noteTools } from "../round3";
@@ -80,8 +80,8 @@ export function registerNotePage(app: Hono<AppEnv>) {
               </p>
               ${note.tags.length ? html`<p class="note-tags">${note.tags.map((t) => html`<a class="tag" href="${searchTag(t)}">${t}</a> `)}</p>` : ""}
               <div class="note-toolbar">
-                <a class="btn btn-primary btn-sm" href="${editUrl(v.name, note.permalink)}" accesskey="e">${icon("pencil", "size-4")}Edit</a>
-                ${noteTools(v.name, note.permalink, note.pinned)}
+                ${canWriteVault(v) ? html`<a class="btn btn-primary btn-sm" href="${editUrl(v.name, note.permalink)}" accesskey="e">${icon("pencil", "size-4")}Edit</a>` : html`<span class="badge">read only</span>`}
+                ${noteTools(v.name, note.permalink, note.pinned, canWriteVault(v))}
                 <a class="btn btn-ghost btn-sm" href="/app/v/${encodeURIComponent(v.name)}/raw/${note.permalink.split("/").map(encodeURIComponent).join("/")}" title="Download the markdown file">${icon("code", "size-4")}.md</a>
               </div>
             </header>

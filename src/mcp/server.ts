@@ -12,7 +12,7 @@ import { type CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { describeAttachments } from "../capture/files";
 import { registerCaptureTools } from "../capture/mcp";
-import { createVault, getVault, listVaults, type Vault, vaultRef, vaultStub } from "../directory";
+import { canWriteVault, createVault, getGuidance, getVault, guideSummary, listVaults, type Vault, vaultRef, vaultStub } from "../directory";
 import { type Caller, DEFAULT_CORE_BUDGET, type Env, SCOPE_WRITE, VERSION } from "../env";
 import { outlineLine, outlineOf } from "../markdown/outline";
 import { diffText, inferText, validateText, validationCounts } from "../schema/picoschema";
@@ -31,7 +31,7 @@ export interface McpIdentity {
   scope: string[];
 }
 
-export const INSTRUCTIONS = `Cairn is the user's long-term memory: markdown notes in projects (default project: the user's default, usually "main"). help documents every tool.
+export const INSTRUCTIONS = `Cairn is the user's long-term memory: markdown notes in projects (default project: the user's default, usually "main"; projects others share with the user are named owner/name). help documents every tool.
 Notes use Basic Memory's format: YAML frontmatter (title, type, tags), observations as "- [category] fact #tag (context)", relations as "- relation_type [[Other Note]]", and inline [[Wiki Links]]. Links to notes that don't exist yet are fine.
 Answering from notes: answer only from what the notes state. If the notes don't state it, say so plainly and stop: don't offer a best guess, a "most likely" option or an inference from nearby facts. Search results are excerpts: read the relevant notes (read_note) before answering a detailed or multi-part question, and before concluding the notes don't cover something. For a question with several parts, make sure each part is answered from a note, or say which part the notes don't cover. Whole-note reads and the top search results show the note's outline (each section with its number of list items and table rows): before answering, check every listed item you need made it into the answer.
 Workflow: search_notes before writing (avoid duplicates; search again with what you learn), read_note to open a note, write_note to create, edit_note for partial changes (pass expected_checksum from your last read to avoid clobbering), build_context to walk links from a note.
@@ -56,7 +56,11 @@ export function strict<T extends z.ZodRawShape>(tool: string, shape: T) {
   });
 }
 
-const projectParam = z.string().min(1).optional().describe("Project name. Defaults to the user's default project.");
+const projectParam = z
+  .string()
+  .min(1)
+  .optional()
+  .describe("Project name: one of the user's own, or owner/name for a project shared with them. Defaults to the user's default project.");
 const outputFormat = z.enum(["text", "json"]).optional().describe("text (default) or json");
 const sinceParam = z.string().optional().describe("How far back: '7d', '24h', '3 days', '2 weeks ago', 'today', 'yesterday', 'last week', or a date.");
 const filtersParam = z
@@ -107,12 +111,26 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
 
   const caller = (tool: string): Caller => ({ userId: who.userId, username: who.username, client: who.clientName, tool });
 
-  async function vaultFor(project: string | undefined): Promise<Vault | ToolText> {
+  /**
+   * The project a call names, if the user may use it: their own by plain name, a shared one as
+   * owner/name. need="write" also requires the owner or editor role (a reader is refused).
+   */
+  async function vaultFor(project: string | undefined, need: "read" | "write" = "read"): Promise<Vault | ToolText> {
     const v = await getVault(env, who.userId, project);
     if (!v) return refuse("NOT_FOUND", project ? `No project named ${project}. Use projects command=list.` : "No default project.");
+    if (need === "write" && !canWriteVault(v))
+      return refuse("FORBIDDEN", `You have read-only access to ${v.name} (reader). Ask its owner for editor access to change it.`);
     return v;
   }
   const isRefusal = (v: unknown): v is ToolText => typeof v === "object" && v !== null && "content" in v;
+  /**
+   * One line pointing at a project's guide, added to every write receipt in a project that has
+   * one (it comes with the project row, so it costs nothing; one line keeps receipts short).
+   */
+  const guideLine = (v: Vault): string[] =>
+    v.guide ? [`guide for ${v.name}: ${guideSummary(v.guide)} (all of it: projects command=guide project="${v.name}")`] : [];
+  /** The whole guide, for the top of build_context and recent_activity. */
+  const guideBlock = (v: Vault): string => (v.guide ? `## Guide for ${v.name}\n${v.guide}\n\n` : "");
   const readOnly = () =>
     refuse("FORBIDDEN", "This connection was granted read-only access (memory:read). Reconnect Cairn and allow memory:write to make changes.");
 
@@ -165,7 +183,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
     },
     async (args) => {
       if (!canWrite) return readOnly();
-      const v = await vaultFor(args.project);
+      const v = await vaultFor(args.project, "write");
       if (isRefusal(v)) return v;
       const rl = await writeLimited();
       if (rl) return rl;
@@ -189,7 +207,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
       if (r.value.unresolved.length) lines.push(`unresolved links (fine; they resolve when those notes exist): ${r.value.unresolved.join(", ")}`);
       if (r.value.similar.length && !r.value.hints)
         lines.push(`similar notes (did you mean to extend one?): ${r.value.similar.map((s) => `${s.title} (${s.permalink})`).join("; ")}`);
-      lines.push(...hintLines(r.value.hints));
+      lines.push(...hintLines(r.value.hints), ...guideLine(v));
       return text(lines.join("\n"));
     },
   );
@@ -287,7 +305,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
     },
     async (args) => {
       if (!canWrite) return readOnly();
-      const v = await vaultFor(args.project);
+      const v = await vaultFor(args.project, "write");
       if (isRefusal(v)) return v;
       const rl = await writeLimited();
       if (rl) return rl;
@@ -307,6 +325,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
           `file_path ${r.value.note.file_path}`,
           `checksum ${r.value.note.checksum}`,
           ...hintLines(r.value.hints),
+          ...guideLine(v),
         ].join("\n"),
       );
     },
@@ -335,7 +354,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
       if (args.path && args.expected_checksum) return refuse("INVALID", "expected_checksum guards one note; it doesn't apply to a folder delete.");
       const rl = await writeLimited();
       if (rl) return rl;
-      const v = await vaultFor(args.project);
+      const v = await vaultFor(args.project, "write");
       if (isRefusal(v)) return v;
       const stub = vaultStub(env, v);
       if (args.path) {
@@ -372,7 +391,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
     async (args) => {
       if (!canWrite) return readOnly();
       if (!!args.identifier === !!args.path) return refuse("INVALID", "Give identifier (a note) or path (a folder), not both.");
-      const v = await vaultFor(args.project);
+      const v = await vaultFor(args.project, "write");
       if (isRefusal(v)) return v;
       const others = (await listVaults(env, who.userId)).filter((x) => x.id !== v.id).map((x) => x.name);
       const head = args.destination.replace(/^memory:\/\//, "").split("/")[0];
@@ -389,7 +408,10 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
         if (args.output_format === "json") return json({ project: v.name, moved: r.value.moved, remaining: r.value.remaining, to: r.value.to });
         const more = r.value.remaining ? `; ${r.value.remaining} more remain (one write per note, ${max} admitted now): run the same move again` : "";
         return text(
-          `moved ${r.value.moved} note(s) from ${v.name}/${args.path.replace(/\/+$/, "")}/ to ${v.name}/${r.value.to}/ (permalinks unchanged)${more}`,
+          [
+            `moved ${r.value.moved} note(s) from ${v.name}/${args.path.replace(/\/+$/, "")}/ to ${v.name}/${r.value.to}/ (permalinks unchanged)${more}`,
+            ...guideLine(v),
+          ].join("\n"),
         );
       }
       const r = await stub.moveNote(vaultRef(v), caller("move_note"), {
@@ -401,7 +423,12 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
       if (args.output_format === "json")
         return json({ project: v.name, from: r.value.from, ...noteFields(r.value.note), receipt: receipt(env, v.name, r.value.note, "moved") });
       return text(
-        [receipt(env, v.name, r.value.note, "moved"), `from ${r.value.from} to ${r.value.note.file_path}`, `checksum ${r.value.note.checksum}`].join("\n"),
+        [
+          receipt(env, v.name, r.value.note, "moved"),
+          `from ${r.value.from} to ${r.value.note.file_path}`,
+          `checksum ${r.value.note.checksum}`,
+          ...guideLine(v),
+        ].join("\n"),
       );
     },
   );
@@ -707,8 +734,8 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
       });
       if (!r.ok) return refuse(r.code, r.message);
       const primary = args.compact ? r.value.primary.map((p) => ({ ...p, observations: [] })) : r.value.primary;
-      if (args.output_format === "json") return json({ project: v.name, ...r.value, primary });
-      const lines: string[] = [];
+      if (args.output_format === "json") return json({ project: v.name, ...(v.guide ? { guide: v.guide } : {}), ...r.value, primary });
+      const lines: string[] = v.guide ? [guideBlock(v).trimEnd(), ""] : [];
       for (const p of primary) {
         lines.push(`# ${p.title} — ${p.permalink} (${p.type}, updated ${p.updated_at.slice(0, 10)})`);
         for (const o of p.observations) lines.push(`- [${o.category}] ${o.content}`);
@@ -768,6 +795,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
     if (args.output_format === "json")
       return json({
         project: v.name,
+        ...(v.guide ? { guide: v.guide } : {}),
         ...(kinds.includes("note") ? r : {}),
         ...(kinds.includes("observation") ? { observations: extra.observations } : {}),
         ...(kinds.includes("relation") ? { relations: extra.relations } : {}),
@@ -777,7 +805,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
       lines.push(...r.writes.map((w) => `${w.at.slice(0, 16)} ${w.action} ${w.title} — ${w.permalink} by ${w.client ?? "?"}${w.tool ? ` (${w.tool})` : ""}`));
     for (const o of extra.observations) lines.push(`${o.updated_at.slice(0, 16)} [${o.category}] ${o.content} — ${o.permalink}`);
     for (const x of extra.relations) lines.push(`${x.updated_at.slice(0, 16)} ${x.type} [[${x.target}]] — ${x.permalink}`);
-    return text(lines.length ? lines.join("\n") : `No changes in ${v.name}${args.since ? ` since ${args.since}` : ""}.`);
+    return text(`${guideBlock(v)}${lines.length ? lines.join("\n") : `No changes in ${v.name}${args.since ? ` since ${args.since}` : ""}.`}`);
   }
 
   // ---- projects ----
@@ -785,9 +813,9 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
     "projects",
     {
       description:
-        "Projects. command: list (projects with note counts) | create (name; set_default) | recent (what changed lately in project: notes, or observations/relations with items; since e.g. 7d, page/page_size).",
+        "Projects. command: list (the user's guidance for choosing a project, then every project with the user's role, note count and the first line of its guide; shared projects are named owner/name) | guide (a project's whole guide: what belongs there and its conventions; read it before writing to a project) | create (name; set_default) | recent (what changed lately in project: notes, or observations/relations with items; since e.g. 7d, page/page_size).",
       inputSchema: strict("projects", {
-        command: z.enum(["list", "recent", "create"]),
+        command: z.enum(["list", "guide", "recent", "create"]),
         project: projectParam,
         name: z.string().min(1).optional(),
         path: z.string().optional().describe("Basic Memory's local folder for create; ignored (Cairn stores notes itself)"),
@@ -803,14 +831,46 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
       }),
     },
     async (args) => {
+      if (args.command === "guide") {
+        const v = await vaultFor(args.project);
+        if (isRefusal(v)) return v;
+        if (args.output_format === "json")
+          return json({ project: v.name, role: v.role, guide: v.guide ?? null, updated_by: v.guide_editor ?? null, updated_at: v.guide_updated_at ?? null });
+        return text(
+          v.guide
+            ? `# Guide for ${v.name} (you are ${v.role}; updated ${v.guide_updated_at?.slice(0, 10) ?? "?"} by ${v.guide_editor ?? "?"})\n\n${v.guide}`
+            : `${v.name} has no guide. Its owner${v.role === "owner" ? " (you)" : ""} or an editor can write one in the project's Sharing page.`,
+        );
+      }
       if (args.command === "list") {
         const vaults = await listVaults(env, who.userId);
+        const guidance = await getGuidance(env, who.userId);
         if (args.output_format === "json")
           return json({
-            projects: vaults.map((x) => ({ name: x.name, default: !!x.is_default, is_default: !!x.is_default, notes: x.note_count, bytes: x.bytes_used })),
+            ...(guidance ? { guidance } : {}),
+            projects: vaults.map((x) => ({
+              name: x.name,
+              default: !!x.is_default,
+              is_default: !!x.is_default,
+              notes: x.note_count,
+              bytes: x.bytes_used,
+              role: x.role,
+              owner: x.owner_username,
+              shared: x.role !== "owner",
+              guide: guideSummary(x.guide),
+            })),
             default_project: vaults.find((x) => x.is_default)?.name ?? null,
           });
-        return text(vaults.map((x) => `${x.name}${x.is_default ? " (default)" : ""} — ${x.note_count} notes`).join("\n"));
+        const head = guidance ? `Your guidance (follow it when choosing a project):\n${guidance}\n\nProjects:\n` : "";
+        const list = vaults
+          .map((x) => {
+            const g = guideSummary(x.guide);
+            // Own projects read as before; a shared one says the caller's role.
+            return `${x.name}${x.is_default ? " (default)" : ""}${x.role !== "owner" ? ` (shared with you: ${x.role})` : ""} — ${x.note_count} notes${g ? `\n  guide: ${g}` : ""}`;
+          })
+          .join("\n");
+        const tail = vaults.some((x) => x.guide) ? '\n\nRead a project\'s whole guide with projects command=guide project="<name>" before writing there.' : "";
+        return text(`${head}${list}${tail}`);
       }
       if (args.command === "create") {
         if (!canWrite) return readOnly();
@@ -820,6 +880,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
         const r = await createVault(env, who.userId, args.name);
         if (!r.ok) return refuse("INVALID", r.message);
         if (args.set_default) {
+          // Only among the caller's own projects: a shared project is never a member's default.
           await env.DB.prepare("UPDATE vaults SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END WHERE owner_id = ?").bind(r.vault.id, who.userId).run();
         }
         return text(`created project ${r.vault.name}${args.set_default ? " (now the default)" : ""}`);
@@ -912,7 +973,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
       if (!canWrite) return readOnly();
       const rl = await writeLimited();
       if (rl) return rl;
-      const v = await vaultFor(args.project);
+      const v = await vaultFor(args.project, "write");
       if (isRefusal(v)) return v;
       const r = await vaultStub(env, v).supersede(vaultRef(v), caller("supersede"), {
         identifier: args.note,
@@ -923,7 +984,13 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
       });
       if (!r.ok) return refuse(r.code, r.message);
       return text(
-        [receipt(env, v.name, r.value.note, "updated"), `superseded: ${r.value.old}`, `now: ${r.value.new}`, `checksum ${r.value.note.checksum}`].join("\n"),
+        [
+          receipt(env, v.name, r.value.note, "updated"),
+          `superseded: ${r.value.old}`,
+          `now: ${r.value.new}`,
+          `checksum ${r.value.note.checksum}`,
+          ...guideLine(v),
+        ].join("\n"),
       );
     },
   );
@@ -1039,8 +1106,13 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
       }
       const p = manPage(docs, args.page);
       if (!p) return refuse("NOT_FOUND", `No manual page ${args.page}. help() lists them.`);
-      if (args.output_format === "json") return json({ page: p.page, text: p.text });
-      return text(p.text);
+      // The index also carries the user's own guidance, and where each project's guide is.
+      const guidance = args.page ? null : await getGuidance(env, who.userId);
+      const extra = args.page
+        ? ""
+        : `\n\nChoosing a project: projects command=list shows each project's guide in one line; projects command=guide project="<name>" reads a whole guide. Follow the user's guidance and the project's guide.${guidance ? `\n\nThe user's guidance:\n${guidance}` : ""}`;
+      if (args.output_format === "json") return json({ page: p.page, text: p.text + extra, ...(guidance ? { guidance } : {}) });
+      return text(p.text + extra);
     },
   );
   return server;

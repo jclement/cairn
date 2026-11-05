@@ -79,6 +79,7 @@ import { safeNext as guard } from "./safe-next.js";
     const opts = await post("/auth/signup/options", {
       username: fd.get("username"),
       invite: fd.get("invite") || undefined,
+      share: fd.get("share") || undefined,
       setupToken: fd.get("setupToken") || undefined,
       claimCode: fd.get("claimCode") || undefined,
     });

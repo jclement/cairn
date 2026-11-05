@@ -13,6 +13,7 @@ import {
   getUserByName,
   inviteValid,
   issueRecoveryCodes,
+  lookupShareLink,
   newId,
   normaliseUsername,
   SESSION_COOKIE,
@@ -56,7 +57,7 @@ export function authRoutes(verifier: WebAuthnVerifier) {
   // ---- sign up ----
   app.post("/signup/options", async (c) => {
     const body = await c.req
-      .json<{ username?: string; invite?: string; setupToken?: string; claimCode?: string }>()
+      .json<{ username?: string; invite?: string; share?: string; setupToken?: string; claimCode?: string }>()
       .catch(() => ({}) as Record<string, string>);
     const username = normaliseUsername(String(body.username ?? ""));
     if (!USERNAME_RE.test(username))
@@ -85,11 +86,19 @@ export function authRoutes(verifier: WebAuthnVerifier) {
     }
     const setupOk = !!(c.env.CAIRN_SETUP_TOKEN && body.setupToken && safeEqual(body.setupToken, c.env.CAIRN_SETUP_TOKEN));
     const inviteOk = await inviteValid(c.env, body.invite);
-    if (!openSignup(c.env) && !inviteOk && !setupOk) return c.json({ error: "Sign-up on this Cairn is by invitation. Ask an admin for an invite link." }, 403);
+    // A share link is an invite to its project (and to this Cairn), while it may still create accounts.
+    const shareOk = !inviteOk && typeof body.share === "string" && !!(await lookupShareLink(c.env, body.share))?.signupOpen;
+    if (!openSignup(c.env) && !inviteOk && !shareOk && !setupOk)
+      return c.json({ error: "Sign-up on this Cairn is by invitation. Ask an admin for an invite link." }, 403);
     if (await getUserByName(c.env, username)) return c.json({ error: "That username is taken." }, 409);
     const userHandle = crypto.getRandomValues(new Uint8Array(16));
     const options = await registrationOptions({ rpName: c.env.APP_NAME || "Cairn", rpID: rpId(c.env), userName: username, userID: userHandle, exclude: [] });
-    const challengeId = await storeChallenge(c, "signup", options.challenge, null, { username, invite: inviteOk ? body.invite : null, admin: setupOk });
+    const challengeId = await storeChallenge(c, "signup", options.challenge, null, {
+      username,
+      invite: inviteOk ? body.invite : null,
+      share: shareOk ? body.share : null,
+      admin: setupOk,
+    });
     return c.json({ challengeId, options });
   });
 
@@ -97,7 +106,14 @@ export function authRoutes(verifier: WebAuthnVerifier) {
     const body = await c.req.json<{ challengeId?: string; response?: unknown }>().catch(() => ({}) as Record<string, unknown>);
     const ch = await takeChallenge(c, body.challengeId, "signup");
     if (!ch) return c.json({ error: "This sign-up attempt expired. Start again." }, 400);
-    const { username, invite, admin, claim, origin } = ch.data as { username: string; invite: string | null; admin: boolean; claim?: string; origin?: string };
+    const { username, invite, share, admin, claim, origin } = ch.data as {
+      username: string;
+      invite: string | null;
+      share?: string | null;
+      admin: boolean;
+      claim?: string;
+      origin?: string;
+    };
     // A claim must finish on the origin it started on (it becomes the canonical URL).
     if (claim && origin !== publicOrigin(c.env)) return c.json({ error: "This claim started at another address. Start again." }, 400);
     let cred: Awaited<ReturnType<WebAuthnVerifier["verifyRegistration"]>>;
@@ -115,7 +131,7 @@ export function authRoutes(verifier: WebAuthnVerifier) {
     if (!cred) return c.json({ error: "Passkey could not be verified." }, 400);
     // Claim the invite and create the account atomically when sign-up needs the invite.
     const needsInvite = !openSignup(c.env) && !admin;
-    if (needsInvite && !invite) return c.json({ error: "Sign-up on this Cairn is by invitation." }, 403);
+    if (needsInvite && !invite && !share) return c.json({ error: "Sign-up on this Cairn is by invitation." }, 403);
     if (claim) {
       if (!(await takeClaim(c.env, claim))) return c.json({ error: "This Cairn has already been claimed, or the claim code expired." }, 409);
       const made = await createUser(c.env, username, true);
@@ -133,19 +149,19 @@ export function authRoutes(verifier: WebAuthnVerifier) {
       return c.json({ ok: true, username: made.user.username, recoveryCodes: codes });
     }
     // With an invite (required or not), claim it in the same transaction so invited_by is recorded.
-    let created = await createUser(c.env, username, admin, invite ? { inviteCode: invite } : {});
+    let created = await createUser(c.env, username, admin, invite ? { inviteCode: invite } : share ? { shareCode: share } : {});
     // Open sign-up: an invite someone else just used doesn't block joining, it just isn't credited.
     if (!created.ok && created.reason === "invite" && !needsInvite) created = await createUser(c.env, username, admin);
     if (!created.ok) {
       return created.reason === "taken"
         ? c.json({ error: "That username is taken." }, 409)
-        : c.json({ error: "This invite has already been used or has expired." }, 403);
+        : c.json({ error: share ? "This share link has been used, revoked or has expired." : "This invite has already been used or has expired." }, 403);
     }
     const user = created.user;
     await insertCredential(c.env, user.id, cred, "first passkey");
     const codes = await issueRecoveryCodes(c.env, user.id);
     const token = await createSession(c.env, user.id, { userAgent: c.req.header("user-agent") });
-    await audit(c.env, user.id, "signup", { admin }, ip(c));
+    await audit(c.env, user.id, "signup", { admin, ...(share && !invite ? { via: "share" } : {}) }, ip(c));
     c.header("Set-Cookie", sessionCookie(token));
     return c.json({ ok: true, username: user.username, recoveryCodes: codes });
   });

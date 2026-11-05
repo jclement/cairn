@@ -61,6 +61,19 @@ export function noteHrefFor(vault: string, permalink: string): string {
   return `/app/v/${encodeURIComponent(vault)}/n/${permalink.split("/").map(encodeURIComponent).join("/")}`;
 }
 
+/** An attachment link: /app/files/<project>/<id>. */
+const FILE_LINK = /^\/app\/files\/[^/?#]+\/([a-z0-9]{12})$/;
+
+/**
+ * Attachments belong to the project their note is in, but the link names the project as whoever
+ * attached the file called it (a plain name, or owner/name in a shared project). Point every
+ * attachment link at the project as the viewer names it, so it opens for owner and members alike.
+ */
+function ownFileUrl(url: string, vault: string): string {
+  const m = FILE_LINK.exec(url);
+  return m ? `/app/files/${encodeURIComponent(vault)}/${m[1]}` : url;
+}
+
 export interface RenderInfo {
   /** The body contains a ```mermaid fence (load the mermaid bundle). */
   mermaid: boolean;
@@ -216,6 +229,8 @@ export function renderMarkdown(markdown: string, opts: { vault: string; links: R
   // Images: lazy, async decode, zoomable.
   const defaultImage = md.renderer.rules.image;
   md.renderer.rules.image = (tokens, idx, options, env, self) => {
+    const src = tokens[idx].attrGet("src");
+    if (src) tokens[idx].attrSet("src", ownFileUrl(String(src), opts.vault));
     tokens[idx].attrSet("loading", "lazy");
     tokens[idx].attrSet("decoding", "async");
     tokens[idx].attrSet("class", "zoomable");
@@ -227,6 +242,7 @@ export function renderMarkdown(markdown: string, opts: { vault: string; links: R
   md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
     const tok = tokens[idx];
     const href = String(tok.attrGet("href") ?? "");
+    if (FILE_LINK.test(href)) tok.attrSet("href", ownFileUrl(href, opts.vault));
     if (/^https?:/i.test(href)) {
       tok.attrSet("rel", "noopener noreferrer nofollow");
       tok.attrSet("target", "_blank");

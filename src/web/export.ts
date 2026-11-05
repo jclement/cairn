@@ -4,7 +4,7 @@
 
 import { strToU8, zipSync } from "fflate";
 import { exportAttachments } from "../capture/files";
-import { listVaults, type Vault, vaultRef, vaultStub } from "../directory";
+import { listOwnedVaults, type Vault, vaultRef, vaultStub } from "../directory";
 import type { Env } from "../env";
 
 /** Account metadata for "download everything": no secrets (no keys, hashes or tokens). */
@@ -12,7 +12,8 @@ export async function accountJson(env: Env, user: { id: string; username: string
   const creds = await env.DB.prepare("SELECT name, created_at, last_used_at, device_type, backed_up FROM credentials WHERE user_id = ? ORDER BY created_at")
     .bind(user.id)
     .all<{ name: string | null; created_at: string; last_used_at: string | null; device_type: string | null; backed_up: number }>();
-  const vaults = await listVaults(env, user.id);
+  // Only the projects this account owns: shared projects belong to (and are exported by) their owners.
+  const vaults = await listOwnedVaults(env, user.id);
   return {
     username: user.username,
     created_at: user.created_at,
@@ -24,13 +25,15 @@ export async function accountJson(env: Env, user: { id: string; username: string
       device_type: c.device_type,
       backed_up: !!c.backed_up,
     })),
-    projects: vaults.map((v) => ({ name: v.name, default: !!v.is_default, notes: v.note_count })),
+    projects: vaults.map((v) => ({ name: v.name, default: !!v.is_default, notes: v.note_count, guide: v.guide ?? null })),
+    guidance: (await env.DB.prepare("SELECT guidance FROM users WHERE id = ?").bind(user.id).first<{ guidance: string | null }>())?.guidance ?? null,
     attachments: "included under <project>/attachments/; links to them in notes are relative paths",
   };
 }
 
+/** A zip of `only` (one project the caller may export), or of every project `userId` OWNS. */
 export async function buildExportZip(env: Env, userId: string, only?: Vault, account?: Record<string, unknown>): Promise<Uint8Array> {
-  const vaults = only ? [only] : await listVaults(env, userId);
+  const vaults = only ? [only] : await listOwnedVaults(env, userId);
   const files: Record<string, Uint8Array> = {};
   const index: string[] = [
     "# Cairn export",

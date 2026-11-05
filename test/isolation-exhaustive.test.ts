@@ -31,7 +31,18 @@ import { describe, expect, it } from "vitest";
 import { parseJsonc } from "../scripts/lib/wrangler-config.mjs";
 import { newInboxKey } from "../src/capture/email";
 import { putAttachment } from "../src/capture/files";
-import { createInvite, createPat, createSession, createVault, deletePat, listPats, type Vault } from "../src/directory";
+import {
+  createInvite,
+  createPat,
+  createSession,
+  createShareLink,
+  createVault,
+  deletePat,
+  listPats,
+  removeMember,
+  revokeShareLink,
+  type Vault,
+} from "../src/directory";
 import worker, { providerOptions } from "../src/index";
 import { BM_NAMES } from "../src/mcp/names";
 import { createApp } from "../src/web/app";
@@ -133,6 +144,18 @@ async function seed() {
   const grantIds = [...appsHtml.matchAll(/name="grant" value="([^"]+)"/g)].map((m) => m[1]);
   if (grantIds.length < 2) throw new Error(`expected 2 grants, saw ${grantIds.length}`);
 
+  // A's private guidance and A's project guide: neither may reach B.
+  await env.DB.prepare("UPDATE users SET guidance = ? WHERE id = ?")
+    .bind(`route work to ${c("guidance")}`, a.user.id)
+    .run();
+  await env.DB.prepare("UPDATE vaults SET guide = ? WHERE id = ?")
+    .bind(`Guide ${c("guide")}`, pv.vault.id)
+    .run();
+  // A share link to A's project, revoked: B holding its code must get nothing from it.
+  const shareLink = await createShareLink(env, { ...pv.vault, role: "owner" }, a.user.id, { role: "editor" });
+  if (!shareLink.ok) throw new Error(shareLink.message);
+  await revokeShareLink(env, pv.vault.id, shareLink.id);
+
   const invite = await createInvite(env, a.user, { note: c("invitenote") });
   if (!invite.ok) throw new Error(invite.message);
   const inboxKey = newInboxKey();
@@ -189,6 +212,8 @@ async function seed() {
       "invitenote",
       "credid",
       "credname",
+      "guidance",
+      "guide",
       ...SEALED,
     ].map(c),
     projName,
@@ -202,6 +227,7 @@ async function seed() {
     aWrite.refreshToken ?? "",
     invite.code,
     inboxKey,
+    shareLink.code,
     ...Object.values(ids),
   ].filter((x) => x && x.length >= 8);
 
@@ -222,6 +248,7 @@ async function seed() {
     bOauth,
     invite,
     inboxKey,
+    revokedShareCode: shareLink.code,
     canaries,
   };
 }
@@ -394,6 +421,16 @@ const ROUTES: Record<string, { public?: true; note?: string }> = {
   "GET /app/wrapped": {},
   "GET /app/wrapped/card.svg": {},
   "POST /app/settings/serious": {},
+  "GET /share/:code": { public: true, note: "a live share link names its project to whoever holds it (by design); dead links all look alike" },
+  "POST /share/accept": {},
+  "GET /app/v/:vault/sharing": {},
+  "POST /app/v/:vault/sharing/links": {},
+  "POST /app/v/:vault/sharing/links/revoke": {},
+  "POST /app/v/:vault/sharing/members": {},
+  "POST /app/v/:vault/sharing/members/remove": {},
+  "POST /app/v/:vault/sharing/leave": {},
+  "POST /app/v/:vault/sharing/guide": {},
+  "POST /app/settings/guidance": {},
 };
 
 /** Endpoints the OAuth provider serves itself (outside the Hono app). */
@@ -463,7 +500,15 @@ function fillPath(path: string, s: Seed): string {
   return path
     .replace(/:rest\{[^}]*\}/, `${s.secretPermalink}/history`)
     .replace(/:(\w+)(\{[^}]*\})?/g, (_m, name: string) => {
-      const v: Record<string, string> = { vault: s.projName, project: s.projName, id: s.ids.att, job: s.ids.job, name: "cairn-notes", file: "index.json" };
+      const v: Record<string, string> = {
+        vault: s.projName,
+        project: s.projName,
+        id: s.ids.att,
+        job: s.ids.job,
+        name: "cairn-notes",
+        file: "index.json",
+        code: s.revokedShareCode,
+      };
       if (!(name in v)) throw new Error(`no value for route param :${name} in ${path}`);
       return encodeURIComponent(v[name]);
     })
@@ -525,6 +570,8 @@ function bodyFields(s: Seed, id: string): Record<string, string> {
     pinned: "1",
     secret: "x",
     confirm: s.a.user.username,
+    guide: "pwned",
+    guidance: "pwned",
   };
 }
 
@@ -1053,6 +1100,8 @@ describe("exhaustive isolation", () => {
       const commands = props.command?.enum ?? props.operation?.enum ?? [undefined];
       const variants: Record<string, unknown>[] = [
         { project: s.projName },
+        // A's project by its shared name: B is not a member, so it must not resolve.
+        { project: `${s.a.user.username}/${s.projName}` },
         ...(props.projects ? [{ projects: [s.projName] }] : []),
         ...(props.all_projects ? [{ all_projects: true }] : []),
         ...(props.identifier
@@ -1118,6 +1167,392 @@ describe("exhaustive isolation", () => {
     if (!own.text.includes(c("projbody"))) failures.push("sanity: A can no longer read A's own note");
     const ownFile = await send(`/app/files/${s.projName}/${s.ids.att}`, { headers: { cookie: s.a.cookie } });
     if (!ownFile.text.includes(c("filebytes"))) failures.push("sanity: A can no longer read A's own file");
+
+    expect(failures).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------- shared projects: the role matrix
+//
+// One owner shares a project. Identities: editor, reader, a removed member, holders of an expired,
+// a revoked and a used single-use link, and an unrelated user. Over every registered route and
+// every MCP tool:
+// - the reader reads, and every write leaves the project unchanged (MCP write tools say FORBIDDEN);
+// - the editor writes, but can't manage members or links (owner-only routes: 403, no change);
+// - the removed member, the dead-link holders and the stranger get exactly the answer a project
+//   that doesn't exist gets (same status, same body with the names swapped): no existence leak,
+//   no content, no change;
+// - dead link codes do nothing, on the landing page or the accept route.
+
+const sc = (label: string) => `shcn${tag}${label}`;
+
+async function seedShared() {
+  const o = await makeUser("owner");
+  const ed = await makeUser("editor");
+  const rd = await makeUser("reader");
+  const gone = await makeUser("removed");
+  const lExp = await makeUser("expiredholder");
+  const lRev = await makeUser("revokedholder");
+  const lUsed = await makeUser("usedholder");
+  const stranger = await makeUser("stranger");
+  const other = await makeUser("spender");
+  const pv = await createVault(env, o.user.id, `team${tag}`);
+  if (!pv.ok) throw new Error(pv.message);
+  const owned = { ...pv.vault, role: "owner" as const };
+  const label = `${o.user.username}/${pv.vault.name}`;
+  const twin = `${o.user.username}/nope${tag}`;
+  const stub = env.VAULT.getByName(pv.vault.id);
+  const ref = { id: pv.vault.id, name: pv.vault.name, ownerId: o.user.id };
+  const w = await stub.writeNote(ref, caller(o.user), {
+    directory: "deep",
+    title: `Team ${sc("title")}`,
+    content: `${sc("body")} ${sc("sealed")}\n\n- [fact] ${sc("obs")}`,
+  });
+  if (!w.ok) throw new Error(w.message);
+  const att = await putAttachment(env, owned as Vault, { bytes: enc(`team file ${sc("filebytes")}`), name: `${sc("filename")}.txt`, source: "upload" });
+  if (!att.ok) throw new Error(att.message);
+
+  await env.DB.prepare("UPDATE vaults SET guide = ? WHERE id = ?")
+    .bind(`Team guide ${sc("guide")}`, pv.vault.id)
+    .run();
+  await env.DB.prepare("UPDATE users SET guidance = ? WHERE id = ?")
+    .bind(`owner's own rules ${sc("guidance")}`, o.user.id)
+    .run();
+  const link = async (role: "editor" | "reader", singleUse = false) => {
+    const l = await createShareLink(env, owned as Vault, o.user.id, { role, singleUse });
+    if (!l.ok) throw new Error(l.message);
+    return l;
+  };
+  const accept = async (cookie: string, code: string) => send("/share/accept", form(cookie, { code }));
+  const edLink = await link("editor");
+  const rdLink = await link("reader");
+  for (const [who, code] of [
+    [ed, edLink.code],
+    [rd, rdLink.code],
+    [gone, rdLink.code],
+  ] as const) {
+    const r = await accept(who.cookie, code);
+    if (r.status !== 303) throw new Error(`join failed: ${r.status} ${r.text.slice(0, 200)}`);
+  }
+  // The removed member could read before removal (so "removed" means something).
+  const before = await send(`/app/v/${encodeURIComponent(label)}/n/${w.value.note.permalink}`, { headers: { cookie: gone.cookie } });
+  if (!before.text.includes(sc("body"))) throw new Error("member could not read before removal");
+  const rm = await send(`/app/v/${encodeURIComponent(pv.vault.name)}/sharing/members/remove`, form(o.cookie, { user: gone.user.id }));
+  if (rm.status !== 303) throw new Error(`remove failed: ${rm.status}`);
+  // Dead links: expired, revoked (through the owner's page), and a single-use link already used.
+  const expired = await link("editor");
+  await env.DB.prepare("UPDATE share_links SET expires_at = ? WHERE id = ?")
+    .bind(new Date(Date.now() - 1000).toISOString(), expired.id)
+    .run();
+  const revoked = await link("editor");
+  const rv = await send(`/app/v/${encodeURIComponent(pv.vault.name)}/sharing/links/revoke`, form(o.cookie, { id: revoked.id }));
+  if (rv.status !== 303) throw new Error(`revoke failed: ${rv.status}`);
+  const used = await link("editor", true);
+  if ((await accept(other.cookie, used.code)).status !== 303) throw new Error("single-use link not usable once");
+  await removeMember(env, pv.vault.id, other.user.id);
+
+  const pat = async (u: { user: { id: string } }) => createPat(env, u.user.id, "share test", ["memory:read", "memory:write"], null);
+  return {
+    o,
+    ed,
+    rd,
+    label,
+    twin,
+    vault: pv.vault,
+    stub,
+    ref,
+    permalink: w.value.note.permalink,
+    att: att.attachment.id,
+    links: { live: edLink.code, expired: expired.code, revoked: revoked.code, used: used.code },
+    pats: { ed: await pat(ed), rd: await pat(rd) },
+    outsiders: [
+      { name: "removed member", ...gone, pat: await pat(gone), code: "" },
+      { name: "expired-link holder", ...lExp, pat: await pat(lExp), code: expired.code },
+      { name: "revoked-link holder", ...lRev, pat: await pat(lRev), code: revoked.code },
+      { name: "used-link holder", ...lUsed, pat: await pat(lUsed), code: used.code },
+      { name: "stranger", ...stranger, pat: await pat(stranger), code: "" },
+    ],
+    canaries: [
+      sc("title"),
+      sc("body"),
+      sc("sealed"),
+      sc("obs"),
+      sc("filebytes"),
+      sc("filename"),
+      sc("guide"),
+      pv.vault.id,
+      att.attachment.id,
+      w.value.note.permalink,
+    ],
+    // Never to anyone but the owner, members included.
+    ownerGuidance: sc("guidance"),
+  };
+}
+type Shared = Awaited<ReturnType<typeof seedShared>>;
+
+async function sharedSnapshot(t: Shared): Promise<string> {
+  const rows = async (sql: string) => JSON.stringify((await env.DB.prepare(sql).bind(t.vault.id).all()).results);
+  const d1 = [
+    await rows("SELECT vault_id, user_id, role FROM vault_members WHERE vault_id = ? ORDER BY user_id"),
+    await rows("SELECT id, role, expires_at, single_use, uses, signups, revoked_at FROM share_links WHERE vault_id = ? ORDER BY id"),
+    await rows("SELECT id, state, bytes FROM attachments WHERE vault_id = ? ORDER BY id"),
+    await rows("SELECT id, owner_id, name, is_default, note_count, guide FROM vaults WHERE id = ?"),
+  ];
+  const doState = await runInDurableObject(t.stub, (_i, state) => {
+    const q = (sql: string) => JSON.stringify(state.storage.sql.exec(sql).toArray());
+    return [q("SELECT * FROM notes ORDER BY id"), q("SELECT COUNT(*) AS n, MAX(id) AS m FROM revisions"), q("SELECT * FROM import_jobs ORDER BY id")].join(
+      "\n",
+    );
+  });
+  return [...d1, doState].join("\n");
+}
+
+/** Make two answers comparable: the project's names become <P>, JSON-RPC ids and timing fields go. */
+function normal(text: string, names: string[]): string {
+  let out = text;
+  for (const n of names.sort((a, b) => b.length - a.length)) {
+    out = out.split(n).join("<P>").split(encodeURIComponent(n)).join("<P>");
+  }
+  return out.replace(/"id":\d+/g, '"id":0').replace(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z/g, "<T>");
+}
+
+describe("shared projects: roles", () => {
+  it("reader reads but can't write, editor can't manage, outsiders can't tell the project exists", { timeout: 600_000 }, async () => {
+    const t = await seedShared();
+    const failures: string[] = [];
+    let before = await sharedSnapshot(t);
+    const check = async (label: string) => {
+      const now = await sharedSnapshot(t);
+      if (now !== before) {
+        failures.push(`${label}: the shared project changed: ${now.slice(0, 400)}`);
+        before = now;
+      }
+    };
+    const fresh = async (userId: string) => `__Host-cairn_session=${await createSession(env, userId)}`;
+    const shortName = t.vault.name;
+    const twinShort = t.twin.split("/")[1];
+
+    // ---- MCP: every tool, every project-addressing variant
+    let rpc = 0;
+    const call = (token: string, method: string, params: unknown) =>
+      send("/mcp", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          host: "localhost:8787",
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          "mcp-protocol-version": "2025-06-18",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: ++rpc, method, params }),
+      });
+    const listed = await call(t.pats.rd, "tools/list", {});
+    const tools = (
+      JSON.parse(
+        listed.text
+          .split("\n")
+          .filter((l) => l.startsWith("data:"))
+          .map((l) => l.slice(5))
+          .pop() ?? listed.text,
+      ) as { result: { tools: { name: string; inputSchema: { properties?: Record<string, { type?: string; enum?: string[] }>; required?: string[] } }[] } }
+    ).result.tools;
+    expect(tools.length).toBeGreaterThan(10);
+    const argsFor = (tool: (typeof tools)[number], project: string): Record<string, unknown>[] => {
+      const props = tool.inputSchema.properties ?? {};
+      const fill: Record<string, unknown> = {
+        identifier: t.permalink,
+        note: t.permalink,
+        query: sc("body"),
+        path: "deep",
+        destination: "moved/",
+        content: "pwned",
+        title: "pwned",
+        observation: sc("obs"),
+        replacement: "pwned",
+        data_base64: btoa("pwned"),
+        filename: "pwned.txt",
+      };
+      const base: Record<string, unknown> = {};
+      for (const r of tool.inputSchema.required ?? []) base[r] = r in fill ? fill[r] : (props[r]?.enum?.[0] ?? "x");
+      const commands = props.command?.enum ?? [undefined];
+      const out: Record<string, unknown>[] = [];
+      for (const command of commands) {
+        if (command === "create") continue; // creates the caller's own project; not about this one
+        const cmd = command ? { command } : {};
+        if (props.project) out.push({ ...base, ...cmd, project }, ...(props.identifier ? [{ ...base, ...cmd, project, identifier: t.permalink }] : []));
+        if (props.projects) out.push({ ...base, ...cmd, projects: [project] });
+      }
+      return out;
+    };
+    const forbidden = new Set<string>();
+    for (const tool of tools) {
+      const write = toolCase(tool.name)?.write === "always";
+      for (const args of argsFor(tool, t.label)) {
+        // Reader: reads work; writes are refused and change nothing.
+        const r = await call(t.pats.rd, "tools/call", { name: tool.name, arguments: args });
+        if (r.status >= 500) failures.push(`reader ${tool.name}: server error`);
+        if (r.text.includes(t.ownerGuidance)) failures.push(`reader ${tool.name}: saw the owner's private guidance`);
+        // Refused: FORBIDDEN, or INVALID when the arguments are refused before the project is.
+        if (write && !/FORBIDDEN|INVALID/.test(r.text)) failures.push(`reader ${tool.name} ${JSON.stringify(args)}: not refused: ${r.text.slice(0, 200)}`);
+        if (write && /FORBIDDEN/.test(r.text)) forbidden.add(tool.name);
+        await check(`reader ${tool.name}`);
+        // Outsiders: the same answer as for a project that doesn't exist.
+        const twinArgs = JSON.parse(JSON.stringify(args).split(t.label).join(t.twin));
+        for (const x of t.outsiders) {
+          const real = await call(x.pat, "tools/call", { name: tool.name, arguments: args });
+          const fake = await call(x.pat, "tools/call", { name: tool.name, arguments: twinArgs });
+          const names = [t.label, t.twin, shortName, twinShort];
+          if (normal(real.text, names) !== normal(fake.text, names) || real.status !== fake.status)
+            failures.push(
+              `${x.name} ${tool.name} ${JSON.stringify(args)}: differs from a missing project: ${real.text.slice(0, 200)} vs ${fake.text.slice(0, 200)}`,
+            );
+          const leaked = [...t.canaries, t.ownerGuidance].filter((cn) => real.text.includes(cn) && !JSON.stringify(args).includes(cn));
+          if (leaked.length) failures.push(`${x.name} ${tool.name}: leaked ${leaked.join(", ")}`);
+          await check(`${x.name} ${tool.name}`);
+        }
+      }
+    }
+    const writeTools = tools.filter((x) => toolCase(x.name)?.write === "always").map((x) => x.name);
+    expect(
+      writeTools.filter((n) => !forbidden.has(n)),
+      "write tools never refused the reader with FORBIDDEN",
+    ).toEqual([]);
+    const pl = await call(t.pats.rd, "tools/call", { name: "projects", arguments: { command: "list" } });
+    if (!pl.text.includes(sc("guide"))) failures.push("guide: the reader's projects list doesn't show the project's guide");
+    // Sanity: the reader really reads; the editor really writes, attributed to them.
+    const rr = await call(t.pats.rd, "tools/call", { name: "read_note", arguments: { project: t.label, identifier: t.permalink } });
+    if (!rr.text.includes(sc("body"))) failures.push("sanity: the reader can't read the shared note");
+    const ew = await call(t.pats.ed, "tools/call", { name: "write_note", arguments: { project: t.label, title: "Editor note", content: "by the editor" } });
+    if (!/saved/.test(ew.text) || !ew.text.includes(t.label)) failures.push(`sanity: the editor can't write: ${ew.text.slice(0, 200)}`);
+    const revs = await t.stub.revisions(t.ref, "editor-note");
+    if (revs[0]?.username !== t.ed.user.username) failures.push(`attribution: revision by ${revs[0]?.username}, not the editor`);
+    before = await sharedSnapshot(t);
+
+    // ---- every web route
+    const registered = [
+      ...new Set(
+        createApp()
+          .routes.filter((r) => r.method !== "ALL")
+          .map((r) => `${r.method} ${r.path}`),
+      ),
+    ];
+    // Routes that end the caller's own session or account, or (leave) are the member's own right.
+    const skip = new Set(["POST /auth/logout", "POST /app/settings/delete", "GET /app/dev-login", "POST /app/v/:vault/sharing/leave"]);
+    const fill = (pattern: string, project: string, code: string) =>
+      pattern
+        .replace(/:rest\{[^}]*\}/, `${t.permalink}/history`)
+        .replace(/:(\w+)(\{[^}]*\})?/g, (_m, name: string) => {
+          const v: Record<string, string> = { vault: project, project, id: t.att, job: "x", name: "cairn-notes", file: "index.json", code: code || "x" };
+          return encodeURIComponent(v[name] ?? "x");
+        })
+        .replace("*", t.permalink);
+    const fields = (project: string, code: string): Record<string, string> => ({
+      guide: "pwned",
+      guidance: "pwned",
+      project,
+      v: project,
+      vault: project,
+      permalink: t.permalink,
+      identifier: t.permalink,
+      title: "pwned",
+      folder: "deep",
+      content: "pwned",
+      expected_checksum: "x",
+      checksum: "x",
+      rev: "1",
+      id: t.att,
+      pin: "1",
+      role: "editor",
+      days: "7",
+      user: t.ed.user.id,
+      code,
+      action: "save",
+      url: "https://example.com/",
+    });
+    const requests = (key: string, project: string, cookie: string, code: string) => {
+      const [method, pattern] = key.split(" ");
+      const path = fill(pattern, project, code);
+      if (method === "GET") {
+        const q = new URLSearchParams({ project, v: project, q: sc("body"), folder: "deep" }).toString();
+        return [{ url: `${path}?${q}`, init: { headers: { cookie } } as RequestInit }];
+      }
+      const f = fields(project, code);
+      const fd = new FormData();
+      for (const [k, v] of Object.entries(f)) fd.set(k, v);
+      fd.set("file", new File([enc("pwned file")], "pwned.txt", { type: "text/plain" }));
+      return [
+        { url: path, init: jsonPost(cookie, f) },
+        { url: path, init: form(cookie, f) },
+        { url: path, init: { method: "POST", headers: { cookie, origin: BASE }, body: fd } as RequestInit },
+      ];
+    };
+    // Routes that address a project (by path, or by a project/v field): outsiders must get the
+    // same answer for this project as for one that doesn't exist. Other routes (sign-in options,
+    // tokens...) answer with fresh random values, so they are checked for leaks and changes only.
+    const addressesProject = (key: string) =>
+      /:vault|:project/.test(key) ||
+      /^(GET|POST) \/app\/(search|api\/search|api\/titles|api\/graph|graph|new|files|files\/delete|clip|api\/notes|api\/notes\/delete|editor\/save|editor\/delete|api\/files|api\/files\/delete|api\/import|settings\/import|settings\/import\/permalinks|api\/import\/:job)$/.test(
+        key,
+      );
+    const ownerOnly = (key: string) => /^POST \/app\/v\/:vault\/sharing\/(links|members)/.test(key);
+    for (const key of registered.filter((k) => !skip.has(k))) {
+      // Reader and editor: no change to the project (the editor only on the owner-only routes).
+      for (const [who, u] of [
+        ["reader", t.rd],
+        ["editor", t.ed],
+      ] as const) {
+        if (who === "editor" && !ownerOnly(key)) continue;
+        for (const r of requests(key, t.label, await fresh(u.user.id), "")) {
+          const res = await send(r.url, r.init);
+          if (res.text.includes(t.ownerGuidance)) failures.push(`${who} ${key}: saw the owner's private guidance`);
+          if (res.status >= 500) failures.push(`${who} ${key}: server error ${res.text.slice(0, 200)}`);
+          if (ownerOnly(key) && res.status !== 403) failures.push(`${who} ${key}: expected 403, got ${res.status}`);
+        }
+        await check(`${who} ${key}`);
+      }
+      // Outsiders: the project's name answers exactly as a name that doesn't exist.
+      for (const x of t.outsiders) {
+        const cookie = await fresh(x.user.id);
+        const real = requests(key, t.label, cookie, x.code);
+        const fake = requests(key, t.twin, cookie, x.code);
+        for (let i = 0; i < real.length; i++) {
+          const a = await send(real[i].url, real[i].init);
+          await check(`${x.name} ${key}`);
+          const b = await send(fake[i].url, fake[i].init);
+          const names = [t.label, t.twin, shortName, twinShort];
+          if (addressesProject(key) && (a.status !== b.status || normal(a.text, names) !== normal(b.text, names)))
+            failures.push(`${x.name} ${key}: differs from a missing project (${a.status} vs ${b.status}): ${a.text.slice(0, 160)} | ${b.text.slice(0, 160)}`);
+          const sent = `${real[i].url} ${String(real[i].init.body ?? "")}`;
+          const leaked = [...t.canaries, t.ownerGuidance].filter((cn) => a.text.includes(cn) && !sent.includes(cn));
+          if (leaked.length) failures.push(`${x.name} ${key}: leaked ${leaked.join(", ")}`);
+        }
+      }
+    }
+    // Sanity: the reader opens the project and the note; the routes above really ran as members.
+    const rv = await send(`/app/v/${encodeURIComponent(t.label)}/n/${t.permalink}`, { headers: { cookie: await fresh(t.rd.user.id) } });
+    if (rv.status !== 200 || !rv.text.includes(sc("body"))) failures.push(`sanity: the reader can't open the note (${rv.status})`);
+
+    // ---- dead links do nothing; a live link held by an outsider is not used by any route above
+    for (const code of [t.links.expired, t.links.revoked, t.links.used]) {
+      const x = t.outsiders[1];
+      const land = await send(`/share/${code}`, { headers: { cookie: await fresh(x.user.id) } });
+      const acc = await send("/share/accept", form(await fresh(x.user.id), { code }));
+      if (land.status !== 404 || acc.status !== 404) failures.push(`dead link ${code.slice(0, 4)}…: landing ${land.status}, accept ${acc.status}`);
+      const anon = await send(`/share/${code}`);
+      if (anon.status !== 404 || t.canaries.some((cn) => anon.text.includes(cn)) || anon.text.includes(t.label))
+        failures.push("dead link: anonymous landing page says something");
+    }
+    await check("dead links");
+    const members = (await env.DB.prepare("SELECT user_id FROM vault_members WHERE vault_id = ?").bind(t.vault.id).all<{ user_id: string }>()).results.map(
+      (m) => m.user_id,
+    );
+    expect(members.sort()).toEqual([t.ed.user.id, t.rd.user.id].sort());
+
+    // ---- leaving works, and then the leaver is an outsider too
+    const leave = await send(`/app/v/${encodeURIComponent(t.label)}/sharing/leave`, form(await fresh(t.rd.user.id), {}));
+    expect(leave.status).toBe(303);
+    const after = await call(t.pats.rd, "tools/call", { name: "read_note", arguments: { project: t.label, identifier: t.permalink } });
+    if (!/NOT_FOUND/.test(after.text) || after.text.includes(sc("body"))) failures.push("a member who left can still read");
 
     expect(failures).toEqual([]);
   });

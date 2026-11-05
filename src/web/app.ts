@@ -8,18 +8,23 @@ import { simpleWebAuthnVerifier, type WebAuthnVerifier } from "../auth/webauthn"
 import { registerCapture } from "../capture/routes";
 import {
   audit,
+  canWriteVault,
   createPat,
   createVault,
   deletePat,
+  GUIDE_TEMPLATES,
   getVault,
+  guideSummary,
   inviterName,
   inviteValid,
   listPats,
   listVaults,
   loadSession,
+  lookupShareLink,
   remainingRecoveryCodes,
   SESSION_COOKIE,
   safeEqual,
+  setVaultGuide,
   type User,
   type Vault,
   vaultRef,
@@ -32,11 +37,12 @@ import { needsReauth, registerAccount, safetyNag } from "./account";
 import { accountJson, buildExportZip } from "./export";
 import { isSerious, memoryScoreSection, registerFun, seriousModeSettings } from "./fun";
 import { importEnabled, registerImport } from "./importer";
-import { ago, folderHref, type H, html, icon, layout, noteHref, when } from "./layout";
+import { ago, folderHref, type H, html, icon, layout, noteHref, raw, when } from "./layout";
 import { safeNext } from "./next";
-import { escapeHtml } from "./render";
+import { escapeHtml, renderMarkdown } from "./render";
 import { registerRound2 } from "./round2";
 import { corePanel, registerRound3 } from "./round3";
+import { registerSharing } from "./sharing";
 import { registerSite } from "./site";
 import type { AppEnv } from "./types";
 import { clientBadge, copyLine, emptyState, pageHeader, panel, settingsLayout, shellOpts } from "./ui";
@@ -161,9 +167,13 @@ export function createApp(opts: { verifier?: WebAuthnVerifier } = {}) {
   app.get("/signup", async (c) => {
     if (c.get("user")) return c.redirect("/app");
     const invite = c.req.query("invite") ?? "";
+    const share = c.req.query("share") ?? "";
     const open = openSignup(c.env);
     const inviteOk = invite ? await inviteValid(c.env, invite) : false;
     const inviter = inviteOk ? await inviterName(c.env, invite) : null;
+    // A share link works as an invite (while it may still create accounts).
+    const shared = !inviteOk && share ? await lookupShareLink(c.env, share) : null;
+    const shareOk = !!shared?.signupOpen;
     return c.html(
       page(
         c,
@@ -171,12 +181,15 @@ export function createApp(opts: { verifier?: WebAuthnVerifier } = {}) {
         html`<h1 class="text-center text-2xl">Create your account</h1>
         <p class="mt-1 mb-0 text-center text-sm text-muted">One passkey and you’re in. No password, no email.</p>
         ${inviter ? html`<p class="callout tip mt-6">${icon("sparkle", "size-5 shrink-0 text-ok")}<span><strong>${inviter}</strong> invited you.</span></p>` : ""}
+        ${shareOk && shared ? html`<p class="callout tip mt-6">${icon("sparkle", "size-5 shrink-0 text-ok")}<span>You’ll join <strong>${shared.label}</strong> as ${shared.role === "editor" ? "an editor" : "a reader"}.</span></p>` : ""}
         ${invite && !inviteOk ? html`<p class="callout warning mt-6">This invite link has been used, revoked or has expired.${open ? " You can still sign up." : ""}</p>` : ""}
-        ${!open && !inviteOk ? html`<p class="callout warning mt-6">Sign-up here is by invitation. Ask someone with an account for an invite link.</p>` : ""}
+        ${share && !shareOk ? html`<p class="callout warning mt-6">This share link has been used, revoked or has expired.${open ? " You can still sign up." : ""}</p>` : ""}
+        ${!open && !inviteOk && !shareOk ? html`<p class="callout warning mt-6">Sign-up here is by invitation. Ask someone with an account for an invite link.</p>` : ""}
         <form data-passkey="signup" data-next="${safeNext(c.req.query("next"))}" class="mt-6 space-y-4">
           <div><label for="username">Username</label>
           <input id="username" name="username" type="text" autocomplete="username webauthn" required minlength="2" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_.\\-]{1,31}" placeholder="e.g. ada" class="h-11"></div>
           <input type="hidden" name="invite" value="${invite}">
+          ${shareOk ? html`<input type="hidden" name="share" value="${share}">` : ""}
           <details class="text-sm"><summary class="text-muted">Setup token (admins only)</summary>
             <div class="mt-3"><label for="setupToken">Setup token</label><input id="setupToken" name="setupToken" type="password" autocomplete="off"></div>
           </details>
@@ -325,7 +338,8 @@ export function createApp(opts: { verifier?: WebAuthnVerifier } = {}) {
       .sort((a, b) => b.w.at.localeCompare(a.w.at))
       .slice(0, 12);
     const totalNotes = vaults.reduce((t, v) => t + v.note_count, 0);
-    const totalBytes = vaults.reduce((t, v) => t + v.bytes_used, 0);
+    // Storage counts against each project's owner: only this account's own projects add up here.
+    const totalBytes = vaults.filter((v) => v.role === "owner").reduce((t, v) => t + v.bytes_used, 0);
     const defaultVault = vaults.find((v) => v.is_default) ?? vaults[0];
     const verb = (a: string) => ({ create: "Created", update: "Updated", edit: "Edited", delete: "Deleted", move: "Moved", revert: "Reverted" })[a] ?? a;
     return c.html(
@@ -379,7 +393,7 @@ export function createApp(opts: { verifier?: WebAuthnVerifier } = {}) {
                       ({ v, w }) => html`<li class="flex items-center gap-3 px-5 py-3">
                         <span class="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent">${icon("bolt", "size-4")}</span>
                         <div class="min-w-0 flex-1"><p class="m-0 truncate text-sm"><span class="text-muted">${verb(w.action)}</span> <a class="font-medium" href="${noteHref(v.name, w.permalink)}">${w.title}</a></p>
-                          <p class="m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">${clientBadge(w.client)}<span>in ${v.name}</span>${w.tool ? html`<span class="font-mono">${w.tool}</span>` : ""}</p></div>
+                          <p class="m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">${clientBadge(w.client)}${w.username && w.username !== user.username ? html`<span>for ${w.username}</span>` : ""}<span>in ${v.name}</span>${w.tool ? html`<span class="font-mono">${w.tool}</span>` : ""}</p></div>
                         <time class="shrink-0 text-xs text-muted" datetime="${w.at}" title="${when(w.at)}">${ago(w.at)}</time>
                       </li>`,
                     )}</ul>`
@@ -398,12 +412,16 @@ export function createApp(opts: { verifier?: WebAuthnVerifier } = {}) {
                   v,
                 ) => html`<li><a class="flex items-center gap-3 rounded-lg px-2 py-2 text-sm text-fg no-underline hover:bg-sunken hover:no-underline" href="${folderHref(v.name, "")}">
                   <span class="flex size-8 items-center justify-center rounded-lg brand-grad text-xs font-bold text-white uppercase">${v.name.slice(0, 1)}</span>
-                  <span class="min-w-0 flex-1"><span class="block truncate font-medium">${v.name}${v.is_default ? html` <span class="badge ml-1">default</span>` : ""}</span>
+                  <span class="min-w-0 flex-1"><span class="block truncate font-medium">${v.name}${v.is_default ? html` <span class="badge ml-1">default</span>` : ""}${v.role !== "owner" ? html` <span class="badge ml-1">${v.role}</span>` : ""}</span>
                   <span class="block text-xs text-muted">${v.note_count} notes · ${Math.ceil(v.bytes_used / 1024)} KB</span></span></a></li>`,
               )}</ul>
               <form method="post" action="/app/projects" class="mt-4 flex gap-2 border-t border-line pt-4">
                 <label for="new-project-name" class="sr-only">New project name</label>
-                <input id="new-project-name" name="name" type="text" placeholder="New project name" required maxlength="48" class="flex-1">
+                <input id="new-project-name" name="name" type="text" placeholder="New project name" required maxlength="48" class="min-w-0 flex-1">
+                <label for="new-project-template" class="sr-only">Starter guide</label>
+                <select id="new-project-template" name="template" class="w-auto" title="A starter guide telling assistants what belongs in the project">${Object.entries(
+                  GUIDE_TEMPLATES,
+                ).map(([k, t]) => html`<option value="${k}">${k === "blank" ? "No guide" : `${t.label} guide`}</option>`)}</select>
                 <button class="secondary" type="submit">Create</button>
               </form>
             </section>
@@ -421,6 +439,9 @@ export function createApp(opts: { verifier?: WebAuthnVerifier } = {}) {
     const form = await c.req.formData();
     const r = await createVault(c.env, user.id, String(form.get("name") ?? ""));
     if (!r.ok) return c.html(page(c, "Error", html`<p class="error">${r.message}</p><p><a href="/app">Back</a></p>`), 400);
+    // A starter guide for assistants, if one was picked (editable on the project's page).
+    const starter = GUIDE_TEMPLATES[String(form.get("template") ?? "")]?.text;
+    if (starter) await setVaultGuide(c.env, { ...r.vault, role: "owner" }, user.id, starter);
     return c.redirect(folderHref(r.vault.name, ""), 303);
   });
 
@@ -451,9 +472,17 @@ export function createApp(opts: { verifier?: WebAuthnVerifier } = {}) {
         ${pageHeader(
           list.path ? (parts.at(-1) ?? list.path) : v.name,
           `${list.folders.length} ${list.folders.length === 1 ? "folder" : "folders"} · ${list.notes.length} ${list.notes.length === 1 ? "note" : "notes"}`,
-          html`<a class="btn btn-secondary" href="/export/${encodeURIComponent(v.name)}">${icon("download", "size-4")} Download this project (.zip)</a>
-          <a class="btn btn-primary" href="/app/new?v=${encodeURIComponent(v.name)}${list.path ? `&folder=${encodeURIComponent(list.path)}` : ""}">${icon("plus", "size-4")} New note</a>`,
+          html`<a class="btn btn-ghost" href="/app/v/${encodeURIComponent(v.name)}/sharing">${icon("user", "size-4")} ${v.role === "owner" ? "Share" : `Shared with you (${v.role})`}</a>
+          ${canWriteVault(v) ? html`<a class="btn btn-secondary" href="/export/${encodeURIComponent(v.name)}">${icon("download", "size-4")} Download this project (.zip)</a>` : ""}
+          ${canWriteVault(v) ? html`<a class="btn btn-primary" href="/app/new?v=${encodeURIComponent(v.name)}${list.path ? `&folder=${encodeURIComponent(list.path)}` : ""}">${icon("plus", "size-4")} New note</a>` : ""}`,
         )}
+        ${
+          v.guide && !list.path
+            ? html`<details class="card mb-4"><summary class="cursor-pointer text-sm font-semibold">Guide for assistants <span class="font-normal text-muted">— ${guideSummary(v.guide)}</span></summary>
+              <div class="note-body prose mt-3">${raw(renderMarkdown(v.guide, { vault: v.name, links: {} }))}</div>
+              <p class="mb-0 text-xs text-muted">Updated ${when(v.guide_updated_at)}${v.guide_editor ? ` by ${v.guide_editor}` : ""}. <a href="/app/v/${encodeURIComponent(v.name)}/sharing#guide">${canWriteVault(v) ? "Edit" : "More"}</a></p></details>`
+            : ""
+        }
         ${
           !list.folders.length && !list.notes.length
             ? html`<div class="card">${emptyState("folder", "Empty.", "Nothing in this folder yet. Ask your assistant to save something here, or write a note yourself.")}</div>`
@@ -506,6 +535,7 @@ export function createApp(opts: { verifier?: WebAuthnVerifier } = {}) {
   // ---- search, editor, graph (src/web/viewer) ----
   registerViewer(app);
   registerCapture(app);
+  registerSharing(app);
 
   // ---- export ----
   app.get("/export", async (c) => {
@@ -528,10 +558,12 @@ export function createApp(opts: { verifier?: WebAuthnVerifier } = {}) {
     if (gate) return gate;
     const v = await vaultOr404(c, user, c.req.param("vault"));
     if (!v) return c.text("Not found", 404);
+    // Owners and editors may download a project; readers read it in the app.
+    if (!canWriteVault(v)) return c.text("Only the project's owner and editors can download it.", 403);
     const zip = await buildExportZip(c.env, user.id, v);
     return c.body(zip as Uint8Array<ArrayBuffer>, 200, {
       "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="cairn-${v.name}-${new Date().toISOString().slice(0, 10)}.zip"`,
+      "Content-Disposition": `attachment; filename="cairn-${v.name.replace("/", "-")}-${new Date().toISOString().slice(0, 10)}.zip"`,
     });
   });
 

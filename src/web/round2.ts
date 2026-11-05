@@ -8,8 +8,8 @@ import {
   inviteQuota,
   inviteStatus,
   listInvites,
+  listOwnedVaults,
   listUsersForAdmin,
-  listVaults,
   revokeAllGrants,
   revokeInvite,
   setUserDisabled,
@@ -109,7 +109,7 @@ export async function gatherStats(env: AppEnv["Bindings"], user: User, scope: Sc
   let apps: number | null = null;
   let everyone: { users: number; notes: number; bytes: number; invitesSent: number; invitesAccepted: number } | null = null;
   if (scope === "mine") {
-    const vaults = await listVaults(env, user.id);
+    const vaults = await listOwnedVaults(env, user.id);
     const snaps = await Promise.all(vaults.map((v) => vaultStub(env, v).statsSnapshot(vaultRef(v))));
     memory = snaps.reduce(
       (acc, s) => {
