@@ -80,6 +80,7 @@ import { safeNext as guard } from "./safe-next.js";
       username: fd.get("username"),
       invite: fd.get("invite") || undefined,
       setupToken: fd.get("setupToken") || undefined,
+      claimCode: fd.get("claimCode") || undefined,
     });
     const cred = await navigator.credentials.create({ publicKey: createOpts(opts.options) });
     const res = await post("/auth/signup/verify", { challengeId: opts.challengeId, response: toJSON(cred) });

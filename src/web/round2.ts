@@ -24,6 +24,7 @@ import { estimateCost, PRICING_SOURCES } from "../stats/pricing";
 import { barChart, type Point, rankList } from "./charts";
 import { importEnabled } from "./importer";
 import { type H, html, icon, when } from "./layout";
+import { sitePanel } from "./site";
 import type { AppEnv } from "./types";
 import { pageHeader, panel, settingsLayout } from "./ui";
 
@@ -266,6 +267,7 @@ export function registerRound2(app: Hono<AppEnv>, page: Page, loginRedirect: (ur
     if (!user) return c.redirect(loginRedirect(c.req.url));
     if (!user.is_admin) return c.html(page(c as never, "Admin", html`<h1>Admin</h1><p>Only admins can see this page.</p>`), 403);
     const users = await listUsersForAdmin(c.env);
+    const instance = await sitePanel(c as never);
     return c.html(
       page(
         c as never,
@@ -273,7 +275,7 @@ export function registerRound2(app: Hono<AppEnv>, page: Page, loginRedirect: (ur
         settingsLayout(
           "admin",
           { isAdmin: !!user.is_admin, importOn: importEnabled(c.env) },
-          html`<h2 class="mt-0 mb-1 text-xl">Accounts</h2>
+          html`${instance}<h2 class="mt-0 mb-1 text-xl">Accounts</h2>
         <p class="mt-0 muted small"><a href="/app/admin/health">Production health</a> · Counts only: admins cannot read anyone's notes. Disabling an account signs it out everywhere, revokes its connected apps and tokens, and refuses sign-in.</p>
         <table><tr><th>User</th><th>Invited by</th><th>Joined</th><th>Last active</th><th>Notes</th><th>Storage</th><th></th></tr>
         ${users.map(

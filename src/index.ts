@@ -8,6 +8,7 @@ import { resolvePat, touchUser } from "./directory";
 import { type AuthProps, type Env, SCOPE_READ, SCOPE_WRITE } from "./env";
 import { buildMcpServer } from "./mcp/server";
 import { recordNightly } from "./memory/cron";
+import { resolveSite, withCanonical } from "./site";
 import { createApp } from "./web/app";
 
 export { VaultDO } from "./vault/do";
@@ -139,17 +140,26 @@ export function withSecurityHeaders(res: Response): Response {
 }
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const limited = await rateLimit(request, env);
+  async fetch(request: Request, rawEnv: Env, ctx: ExecutionContext): Promise<Response> {
+    const limited = await rateLimit(request, rawEnv);
     if (limited) return withSecurityHeaders(limited);
+    // The canonical URL (configured, recorded at the claim, or the request's before the claim), a
+    // redirect off a non-canonical host, or "not claimed yet" (src/site.ts).
+    const site = await resolveSite(request, rawEnv);
+    if (site.response) return withSecurityHeaders(site.response);
+    const env = site.env;
     if (!cached || cached.url !== env.PUBLIC_URL) cached = { url: env.PUBLIC_URL, provider: new OAuthProvider<Env>(providerOptions(env)) };
     return withSecurityHeaders(await cached.provider.fetch(request, env, ctx));
   },
   /** Cloudflare Email Routing: mail to INBOUND_EMAIL_ADDRESS becomes notes (src/capture/email.ts). */
   async email(message: ForwardableEmailMessage, env: Env): Promise<void> {
-    await handleEmail(message, env);
+    await handleEmail(message, await withCanonical(env));
   },
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(recordNightly(env, new Date(controller.scheduledTime)).then(() => undefined));
+    ctx.waitUntil(
+      withCanonical(env)
+        .then((e) => recordNightly(e, new Date(controller.scheduledTime)))
+        .then(() => undefined),
+    );
   },
 } satisfies ExportedHandler<Env>;

@@ -1,12 +1,15 @@
-// Cairn: one Worker. Production config at the top level; `env.local` (no Workers AI / Vectorize,
-// which need a Cloudflare login even in `wrangler dev`) is used by `mise run dev` and the tests.
+// Cairn: one Worker.
 //
-// The top-level values (D1/KV ids, routes, PUBLIC_URL, INBOUND_EMAIL_ADDRESS) are the maintainer's
-// instance. For your own, run `npm run setup:cloudflare` (it creates the resources and rewrites
-// those values in your copy), or follow README "Deploy your own" by hand:
-//   npx wrangler d1 create cairn                     -> d1_databases[0].database_id
-//   npx wrangler kv namespace create cairn-oauth     -> kv_namespaces[0].id
-//   npx wrangler vectorize create cairn-notes --dimensions=1024 --metric=cosine
+// The TOP LEVEL is a template for your own instance: the "Deploy to Cloudflare" button (README)
+// provisions its resources from it, and `wrangler deploy` with no --env deploys it. It carries no
+// account-specific ids: the button (or wrangler's automatic provisioning) creates the D1 database,
+// KV namespace and R2 bucket; `npm run setup:cloudflare` also creates the Vectorize index and
+// writes the ids back into your copy. PUBLIC_URL may stay empty: the first admin's claim records
+// the site's address (Settings → Admin can move it later).
+//
+// `env.owg` is the maintainer's instance (deployed with --env owg by CI on jclement/cairn only).
+// `env.local` (no Workers AI / Vectorize, which need a Cloudflare login even in `wrangler dev`) is
+// used by `mise run dev` and the tests. Environments inherit no bindings: each lists them all.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "cairn",
@@ -14,8 +17,9 @@
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": true,
-  // Custom domain (its zone must be on the same account). For workers.dev only, make it an empty list.
-  "routes": [{ "pattern": "cairn.onewheelgeek.net", "custom_domain": true }],
+  // Custom domain: add it in the dashboard (Worker → Settings → Domains & Routes), or list it here,
+  // e.g. [{ "pattern": "cairn.example.com", "custom_domain": true }] (its zone must be on the account).
+  "routes": [],
   "observability": { "enabled": true },
   // Nightly memory maintenance: expiries, gardening reports, Monday digests (src/memory/cron.ts).
   "triggers": { "crons": ["0 3 * * *"] },
@@ -27,13 +31,14 @@
     "run_worker_first": [
       "/", "/connect", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*", "/authorize",
       "/app", "/app/*", "!/app/owg/*", "!/app/cairn/*", "!/app/dist/*", "!/app/viewer/*", "!/app/ui/*", "!/app/fonts/*",
-      "/signup", "/login", "/recover", "/auth/*", "/export", "/export/*", "/health", "/setup.md", "/skills/*"
+      "/signup", "/login", "/recover", "/auth/*", "/export", "/export/*", "/health", "/setup.md", "/skills/*", "/claim", "/claim/*"
     ]
   },
   "vars": {
     "APP_NAME": "Cairn",
-    "PUBLIC_URL": "https://cairn.onewheelgeek.net",
-    "OPEN_SIGNUP": "true",
+    // Empty: the address you claim the site at becomes its canonical URL (recorded in D1).
+    "PUBLIC_URL": "",
+    "OPEN_SIGNUP": "false",
     "EMBEDDING_MODEL": "@cf/qwen/qwen3-embedding-0.6b",
     "JEV_MODEL": "typesafe/jev",
     "INVITES_PER_USER": "5",
@@ -42,26 +47,21 @@
     // "true" also registers Basic Memory's bm_* tool names as aliases (for migrating BM skills).
     "BM_COMPAT": "false",
     "AI_DAILY_TOKENS": "1000000",
-    "DIGEST_MODEL": "@cf/google/gemma-4-26b-a4b-it",
-    // Email capture: Email Routing rule for this address -> this Worker (see README "Capture").
-    "INBOUND_EMAIL_ADDRESS": "cairn@onewheelgeek.net"
+    "DIGEST_MODEL": "@cf/google/gemma-4-26b-a4b-it"
+    // Email capture is off; to turn it on add "INBOUND_EMAIL_ADDRESS": "cairn@example.com" and an
+    // Email Routing rule sending that address to this Worker (README "Capture").
   },
-  // Attachments (create once: npx wrangler r2 bucket create cairn-files)
+  // Attachments and images.
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "cairn-files" }],
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "cairn",
-      "database_id": "1f6a766f-caf6-4cc1-af9a-afed51e5729e",
-      "migrations_dir": "migrations"
-    }
-  ],
-  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "0e9cb5d7c1864024aa28aa8693438a7e" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "cairn", "migrations_dir": "migrations" }],
+  "kv_namespaces": [{ "binding": "OAUTH_KV" }],
+  // Never rename the class: each project's notes live in a VaultDO instance.
   "durable_objects": {
     "bindings": [{ "name": "VAULT", "class_name": "VaultDO" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["VaultDO"] }],
   "ai": { "binding": "AI" },
+  // 1024 dimensions, cosine (npx wrangler vectorize create cairn-notes --dimensions=1024 --metric=cosine).
   "vectorize": [{ "binding": "VECTORIZE", "index_name": "cairn-notes" }],
   "ratelimits": [
     { "name": "RL_AUTH", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } },
@@ -74,26 +74,80 @@
     { "name": "RL_INVITE", "namespace_id": "1007", "simple": { "limit": 10, "period": 60 } }
   ],
   "env": {
-    "local": {
-      // Don't inherit the production custom-domain route: wrangler dev uses the route as the
-      // "local upstream" and rewrites Host/Origin to it, which fails the app's Origin (CSRF) check.
-      "routes": [],
-      // Static files (marketing site + app CSS/JS). The Worker runs first for its own routes;
-      // everything else is served from public/ by the asset worker.
+    "owg": {
+      // The SAME Worker as before environments existed: without this name wrangler would deploy
+      // to "cairn-owg", a new Worker with no access to the existing Durable Objects (the vaults).
+      "name": "cairn",
+      "routes": [{ "pattern": "cairn.onewheelgeek.net", "custom_domain": true }],
+      "triggers": { "crons": ["0 3 * * *"] },
       "assets": {
         "directory": "./public",
         "binding": "ASSETS",
         "run_worker_first": [
           "/", "/connect", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*", "/authorize",
           "/app", "/app/*", "!/app/owg/*", "!/app/cairn/*", "!/app/dist/*", "!/app/viewer/*", "!/app/ui/*", "!/app/fonts/*",
-          "/signup", "/login", "/recover", "/auth/*", "/export", "/export/*", "/health", "/setup.md", "/skills/*"
+          "/signup", "/login", "/recover", "/auth/*", "/export", "/export/*", "/health", "/setup.md", "/skills/*", "/claim", "/claim/*"
+        ]
+      },
+      "vars": {
+        "APP_NAME": "Cairn",
+        "PUBLIC_URL": "https://cairn.onewheelgeek.net",
+        "OPEN_SIGNUP": "true",
+        "EMBEDDING_MODEL": "@cf/qwen/qwen3-embedding-0.6b",
+        "JEV_MODEL": "typesafe/jev",
+        "INVITES_PER_USER": "5",
+        "IMPORT_ENABLED": "true",
+        "SCHEMA_ENABLED": "true",
+        "BM_COMPAT": "false",
+        "AI_DAILY_TOKENS": "1000000",
+        "DIGEST_MODEL": "@cf/google/gemma-4-26b-a4b-it",
+        // Email capture: Email Routing rule for this address -> this Worker (see README "Capture").
+        "INBOUND_EMAIL_ADDRESS": "cairn@onewheelgeek.net"
+      },
+      "r2_buckets": [{ "binding": "FILES", "bucket_name": "cairn-files" }],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "cairn",
+          "database_id": "1f6a766f-caf6-4cc1-af9a-afed51e5729e",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "0e9cb5d7c1864024aa28aa8693438a7e" }],
+      "durable_objects": {
+        "bindings": [{ "name": "VAULT", "class_name": "VaultDO" }]
+      },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["VaultDO"] }],
+      "ai": { "binding": "AI" },
+      "vectorize": [{ "binding": "VECTORIZE", "index_name": "cairn-notes" }],
+      "ratelimits": [
+        { "name": "RL_AUTH", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } },
+        { "name": "RL_OAUTH", "namespace_id": "1002", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_TOKEN", "namespace_id": "1003", "simple": { "limit": 300, "period": 60 } },
+        { "name": "RL_AUTHORIZE", "namespace_id": "1004", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_WRITE", "namespace_id": "1005", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_SEARCH", "namespace_id": "1006", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_INVITE", "namespace_id": "1007", "simple": { "limit": 10, "period": 60 } }
+      ]
+    },
+    "local": {
+      // No routes: wrangler dev uses a route as the "local upstream" and rewrites Host/Origin to
+      // it, which fails the app's Origin (CSRF) check.
+      "routes": [],
+      "assets": {
+        "directory": "./public",
+        "binding": "ASSETS",
+        "run_worker_first": [
+          "/", "/connect", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*", "/authorize",
+          "/app", "/app/*", "!/app/owg/*", "!/app/cairn/*", "!/app/dist/*", "!/app/viewer/*", "!/app/ui/*", "!/app/fonts/*",
+          "/signup", "/login", "/recover", "/auth/*", "/export", "/export/*", "/health", "/setup.md", "/skills/*", "/claim", "/claim/*"
         ]
       },
       "vars": {
         "APP_NAME": "Cairn",
         "PUBLIC_URL": "http://localhost:8787",
         "OPEN_SIGNUP": "true",
-        // Dev-only sign-in route for headless UI checks (GET /app/dev-login). Never set at the top level.
+        // Dev-only sign-in route for headless UI checks (GET /app/dev-login). Never set elsewhere.
         "DEV_LOGIN": "1",
         "EMBEDDING_MODEL": "@cf/qwen/qwen3-embedding-0.6b",
         "JEV_MODEL": "typesafe/jev",

@@ -1,6 +1,13 @@
 # Copy to .dev.vars for `mise run dev` (never commit .dev.vars).
-# Whoever presents this token at sign-up (or in Settings → Admin) becomes an admin.
-CAIRN_SETUP_TOKEN=change-me-to-a-long-random-string
+#
+# No secrets are required: on a fresh database the site asks you to claim it with a one-time code
+# that the Worker prints to its log (the `mise run dev` terminal, or Worker → Logs on Cloudflare).
+#
+# Optional, and deliberately commented out (the Deploy to Cloudflare button offers every secret
+# listed here, and a placeholder accepted as-is would let anyone become an admin): whoever presents
+# CAIRN_SETUP_TOKEN at sign-up (or in Settings → Admin) becomes an admin.
+# CAIRN_SETUP_TOKEN=a-long-random-string
+#
 # Optional: use the deterministic fake embedder + in-DO vector store so semantic search
 # works offline (Workers AI / Vectorize are not bound in the local env).
 # CAIRN_FAKE_EMBEDDINGS=1

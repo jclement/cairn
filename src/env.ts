@@ -20,7 +20,18 @@ export interface Env {
   RL_WRITE?: RateLimit;
   OAUTH_PROVIDER: OAuthHelpers;
   APP_NAME: string;
+  /**
+   * The canonical URL. Optional in the config ("" = unset: the claim records it, see src/site.ts);
+   * every handler behind the Worker entry sees the resolved origin here.
+   */
   PUBLIC_URL: string;
+  /** Set by src/site.ts: where PUBLIC_URL came from ("env" configured, "db" recorded, "request" before the claim). */
+  CAIRN_URL_SOURCE?: string;
+  /** The deployed commit and its time (unix seconds), passed by scripts/deploy.mjs; for the update notice. */
+  CAIRN_COMMIT?: string;
+  CAIRN_COMMIT_TIME?: string;
+  /** "off": never ask GitHub for a newer version (tests, air-gapped instances). */
+  CAIRN_UPDATE_CHECK?: string;
   OPEN_SIGNUP?: string;
   EMBEDDING_MODEL?: string;
   /** Secret. Whoever presents it at signup or in settings becomes an admin. */

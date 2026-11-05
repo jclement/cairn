@@ -3,30 +3,35 @@
 //
 // Uses the deploy token from the environment (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID); the
 // token is only ever sent to api.cloudflare.com and never printed. Reads the Worker name, D1
-// database id and Vectorize index from wrangler.jsonc. Reports the deployed version, migrations
+// database id and Vectorize index from wrangler.jsonc (env `owg`; --env <name> for another, --env "" for the top level). Reports the deployed version, migrations
 // applied vs the repo, AI failure rates, the nightly cron, counts (no content), stuck imports,
 // email ingestion and the Vectorize index. Exits 1 when there is a red flag, 2 when it can't check.
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectHealth } from "../src/stats/health.ts";
+import { parseJsonc } from "./lib/wrangler-config.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const asJson = process.argv.includes("--json");
 const API = "https://api.cloudflare.com/client/v4";
 
-/** Top-level values from wrangler.jsonc (the production config is everything before "env"). */
-export function readConfig(text) {
-  const top = text.split(/\n\s*"env"\s*:/)[0];
-  const pick = (re, what) => {
-    const m = re.exec(top);
-    if (!m) throw new Error(`wrangler.jsonc: no ${what}`);
-    return m[1];
+/**
+ * The instance's values from wrangler.jsonc: environment `env` (default "owg", the maintainer's
+ * instance; "" for the top level). Environments inherit nothing we need, so each names its own.
+ */
+export function readConfig(text, env = "owg") {
+  const c = parseJsonc(text);
+  const e = env ? c.env?.[env] : c;
+  if (!e) throw new Error(`wrangler.jsonc: no env.${env}`);
+  const need = (v, what) => {
+    if (!v) throw new Error(`wrangler.jsonc${env ? ` env.${env}` : ""}: no ${what}`);
+    return v;
   };
   return {
-    worker: pick(/^\s*"name"\s*:\s*"([^"]+)"/m, "name"),
-    database: pick(/"database_id"\s*:\s*"([^"]+)"/, "d1 database_id"),
-    vectorIndex: pick(/"index_name"\s*:\s*"([^"]+)"/, "vectorize index_name"),
+    worker: need(e.name ?? c.name, "name"),
+    database: need(e.d1_databases?.[0]?.database_id, "d1 database_id"),
+    vectorIndex: need(e.vectorize?.[0]?.index_name, "vectorize index_name"),
   };
 }
 
@@ -39,7 +44,8 @@ async function main() {
   const token = process.env.CLOUDFLARE_API_TOKEN;
   const account = process.env.CLOUDFLARE_ACCOUNT_ID;
   if (!token || !account) fail("set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (the deploy token) in the environment.");
-  const cfg = readConfig(readFileSync(join(root, "wrangler.jsonc"), "utf8"));
+  const envIdx = process.argv.indexOf("--env");
+  const cfg = readConfig(readFileSync(join(root, "wrangler.jsonc"), "utf8"), envIdx >= 0 ? (process.argv[envIdx + 1] ?? "") : "owg");
 
   const cf = async (path, init = {}) => {
     const res = await fetch(`${API}/accounts/${account}${path}`, {

@@ -56,27 +56,31 @@ create it by hand either way.
 
 ## 3. Configure `wrangler.jsonc`
 
-**This repository's top-level config is the maintainer's instance.** For your own instance change
-at least these (`npm run setup:cloudflare` does it for you):
+**The top-level config is a template with no account ids** (the Deploy to Cloudflare button
+deploys it as is). `env.owg` is the maintainer's instance and `env.local` local development;
+leave both alone. For a command-line deploy set these at the top level
+(`npm run setup:cloudflare` does it for you):
 
 | Setting | What to set |
 |---|---|
-| `d1_databases[0].database_id` | your D1 id |
-| `kv_namespaces[0].id` | your KV id |
+| `d1_databases[0].database_id` | your D1 id (add the key; wrangler can also find the database by `database_name`) |
+| `kv_namespaces[0].id` | your KV id (add the key) |
 | `routes` | your custom domain (`{ "pattern": "cairn.example.com", "custom_domain": true }`, zone on the same account), or delete it and use `*.workers.dev` (`workers_dev: true` is already set) |
-| `vars.PUBLIC_URL` | the exact URL people will use, e.g. `https://cairn.example.com` or `https://cairn.<you>.workers.dev` |
-| `vars.INBOUND_EMAIL_ADDRESS` | your capture address (§7), or delete it to turn email capture off |
+| `vars.PUBLIC_URL` | optional: empty means the address the site is claimed at (§6), recorded in D1; or pin it, e.g. `https://cairn.example.com` |
+| `vars.INBOUND_EMAIL_ADDRESS` | optional: your capture address (§7); unset means email capture is off |
 
-**`PUBLIC_URL` matters more than anything else.** Passkeys are bound to its hostname and every
-POST must come from its origin; OAuth metadata is built from it. Changing it later makes every
-existing passkey unusable (users would need recovery codes). Pick it before anyone signs up.
+**The URL matters more than anything else.** Passkeys are bound to its hostname and every POST
+must come from its origin; OAuth metadata is built from it. Requests on another host the Worker
+answers on are redirected to it (GET) or refused (421). Changing it later (Settings → Admin →
+This Cairn, or `PUBLIC_URL`, which always wins) makes every existing passkey unusable: users sign
+in with recovery codes and add new passkeys. Claim at the address you will keep.
 
 Other settings (top-level `vars`):
 
 | Var | Default | Meaning |
 |---|---|---|
 | `APP_NAME` | `Cairn` | shown in the app and on the OAuth consent page |
-| `OPEN_SIGNUP` | `"true"` here | `"false"` makes sign-up invite-only (anyone with an account can invite; admins always can; the setup token always admits) |
+| `OPEN_SIGNUP` | `"false"` | `"true"` lets anyone sign up; otherwise sign-up is invite-only (anyone with an account can invite; admins always can; the setup token always admits) |
 | `INVITES_PER_USER` | `5` | outstanding invite links a non-admin may hold |
 | `EMBEDDING_MODEL` | `@cf/qwen/qwen3-embedding-0.6b` | embeddings (1024 dimensions, matching the Vectorize index). Changing it later means re-embedding. |
 | `JEV_MODEL` | `typesafe/jev` | the judgement model for write hints and re-ranking; `""` turns them off |
@@ -92,15 +96,19 @@ would rewrite Origin to it and every local form POST would fail the CSRF check.)
 The cron trigger (`0 3 * * *`) runs nightly maintenance: expiring observations, the gardening note
 and the Monday digest, and attachment recovery. Keep it.
 
-## 4. Secrets
+## 4. Secrets (optional)
+
+None are required: the first admin claims the site with a one-time code from the Worker's log
+(§6). If you prefer a setup token:
 
 ```sh
 openssl rand -base64 32 | tee /dev/tty | npx wrangler secret put CAIRN_SETUP_TOKEN
 ```
 
-Whoever presents this token at sign-up, or later in Settings → Admin, becomes an admin. Nobody is
-an admin by default. Keep it in your password manager; you can rotate it with the same command.
-`.dev.vars.example` lists it for local development (`cp .dev.vars.example .dev.vars`).
+Whoever presents this token at sign-up, or later in Settings → Admin, becomes an admin, and the
+claim page is off. Keep it in your password manager; you can rotate it with the same command.
+`.dev.vars.example` mentions it, commented out (the Deploy button offers every secret listed
+there, and an accepted placeholder would let anyone become an admin).
 
 ## 5. Deploy
 
@@ -108,19 +116,26 @@ an admin by default. Keep it in your password manager; you can rotate it with th
 mise run deploy
 ```
 
-which runs, in order: the browser build (`node scripts/build-client.mjs` into `public/app/dist/`
-and the Tailwind CSS into `public/app/ui/app.css`), `wrangler d1 migrations apply DB --remote`,
-`wrangler deploy`. `npm run deploy` does the same without mise.
+(`mise run deploy:self`; `mise run deploy` is the maintainer's `env.owg`) which runs, in order:
+the browser build (`node scripts/build-client.mjs` into `public/app/dist/` and the Tailwind CSS
+into `public/app/ui/app.css`), then `scripts/deploy.mjs`: `wrangler d1 migrations apply DB
+--remote`, `wrangler deploy` (with the build's commit, for the update notice). `npm run deploy`
+does the same without mise.
 
 Check it: `curl https://<PUBLIC_URL host>/health` returns `{"ok":true,"version":"0.1.0"}`, and
 `curl -X POST https://<host>/mcp` returns 401 with a `WWW-Authenticate` header.
 
 ## 6. First run
 
-1. Open `PUBLIC_URL`, choose **Sign up**, pick a username and create a passkey. Save the 10
-   recovery codes it shows (each signs you in once, only to add a new passkey).
-2. To become an admin, open the *Setup token (admins only)* field at sign-up, or later Settings →
-   Admin, and paste `CAIRN_SETUP_TOKEN`.
+1. Open the site. With no users and no `CAIRN_SETUP_TOKEN` it shows only **Claim this Cairn**
+   (every other page redirects there; APIs and OAuth answer 503). The Worker writes a one-time
+   code to its log (`Cairn claim code: XXXXX-XXXXX`; dashboard → the Worker → Logs, or
+   `npx wrangler tail`); it lives 30 minutes, only its hash is stored, and new ones can be
+   requested once a minute. Enter it with a username and create your passkey: you are the
+   admin, the address becomes the canonical URL (unless `PUBLIC_URL` is set), and the claim page
+   never comes back. Save the 10 recovery codes it shows.
+2. With `CAIRN_SETUP_TOKEN` set instead: choose **Sign up**, open *Setup token (admins only)*,
+   paste it and create your passkey (or later Settings → Admin).
 3. Add a second passkey (Settings → Account) so losing one device isn't a recovery event.
 4. Connect an assistant (README → *Connect an assistant*): the MCP URL is `PUBLIC_URL/mcp`.
 
@@ -173,26 +188,21 @@ on `/app/stats` per user and per model.
 
 ## Deploy to Cloudflare button
 
-Once the repository is public, a [Deploy to Cloudflare](https://developers.cloudflare.com/workers/platform/deploy-buttons/)
-button can clone it into the deployer's account, provision D1, KV, R2, Vectorize, Workers AI and
-the Durable Object from `package.json` → `cloudflare.bindings`, prompt for `CAIRN_SETUP_TOKEN`
-(listed in `.dev.vars.example`) and run `npm run deploy` (build, migrations, deploy):
-
-```markdown
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/jclement/cairn)
-```
-
-It can't know your URL, and the copy it makes still carries the maintainer's route and
-`PUBLIC_URL`. Right after it finishes, in your new repository set `routes` to `[]` (or your
-domain) and `PUBLIC_URL` to the new `https://cairn.<you>.workers.dev`, and redeploy, **before
-anyone signs up**. This path hasn't been tried end to end; the script above is the tested one.
+The README's button clones the repository into the deployer's GitHub account, provisions D1, KV,
+R2, Vectorize, Workers AI and the Durable Object from the top level of `wrangler.jsonc` (the
+prompts come from `package.json` → `cloudflare.bindings`), and runs `npm run build` and
+`npm run deploy` (migrations, then deploy) in Workers Builds. The result runs at
+`https://cairn.<you>.workers.dev` with no URL configured; add a custom domain in the dashboard
+first if you want one, then claim the site (§6) at the address you will keep. Updates: the copy
+is not a GitHub fork, so it carries `.github/workflows/update.yml` (*Actions → Update Cairn*),
+which merges `jclement/cairn` `main` and pushes; Workers Builds redeploys.
 
 ## 11. Continuous deployment
 
 `.github/workflows/deploy.yml` runs `mise run check` on every push to `main`; if green, a job in the
 `production` GitHub environment runs `mise run deploy` and smoke-tests `/health`, the OAuth metadata
-and `/mcp` at the `PUBLIC_URL` in `wrangler.jsonc`. For your fork: commit your `wrangler.jsonc`,
-and add the `CLOUDFLARE_API_TOKEN` secret and the `CLOUDFLARE_ACCOUNT_ID` variable to a
+and `/mcp` at `env.owg`'s `PUBLIC_URL`. Both jobs run only on `jclement/cairn`. For your fork:
+add your own environment to `wrangler.jsonc` and point the workflow at it, and add the `CLOUDFLARE_API_TOKEN` secret and the `CLOUDFLARE_ACCOUNT_ID` variable to a
 `production` environment. The token's least-privilege permission list is in the README
 (*Deploy from GitHub Actions*). `mise run smoke:live` and `mise run oauth:live` (with
 `CAIRN_URL=` your instance) are fuller end-to-end checks; see the README's *Development*.

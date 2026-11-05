@@ -28,6 +28,7 @@
 import { createExecutionContext, env, runInDurableObject, waitOnExecutionContext } from "cloudflare:test";
 import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
+import { parseJsonc } from "../scripts/lib/wrangler-config.mjs";
 import { newInboxKey } from "../src/capture/email";
 import { putAttachment } from "../src/capture/files";
 import { createInvite, createPat, createSession, createVault, deletePat, listPats, type Vault } from "../src/directory";
@@ -362,6 +363,9 @@ const ROUTES: Record<string, { public?: true; note?: string }> = {
   "POST /app/settings/tokens": {},
   "POST /app/settings/tokens/delete": {},
   "POST /app/settings/admin": {},
+  "GET /claim": { public: true, note: "redirects to / once the site is claimed; before that there is no data" },
+  "POST /claim/new": { public: true, note: "404 once the site is claimed" },
+  "POST /app/admin/site": { note: "admin only, after re-authentication" },
   "GET /app/settings/apps": {},
   "POST /app/settings/apps/revoke": {},
   "GET /authorize": {},
@@ -813,8 +817,10 @@ async function runControls(s: Seed, freshB: () => Promise<string>, failures: str
 describe("exhaustive isolation", () => {
   it("covers every route, provider endpoint and MCP tool without leaking or changing A's data", { timeout: 600_000 }, async () => {
     // Production config never enables dev-login (it would let anyone sign in as anyone).
-    const topLevel = wranglerConfig.split(/"env"\s*:/)[0];
-    expect(topLevel).not.toMatch(/"DEV_LOGIN"\s*:\s*"1"/);
+    const cfg = parseJsonc(wranglerConfig);
+    expect(cfg.vars.DEV_LOGIN).toBeUndefined();
+    for (const [name, e] of Object.entries(cfg.env as Record<string, { vars?: Record<string, string> }>))
+      if (name !== "local") expect(e.vars?.DEV_LOGIN, name).toBeUndefined();
 
     const s = await seed();
     const failures: string[] = [];

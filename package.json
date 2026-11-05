@@ -7,7 +7,7 @@
   "license": "MIT",
   "scripts": {
     "build": "node scripts/build-client.mjs && tailwindcss -i src/ui/app.css -o public/app/ui/app.css --minify",
-    "deploy": "npm run build && wrangler d1 migrations apply DB --remote && wrangler deploy",
+    "deploy": "npm run build && node scripts/deploy.mjs",
     "setup:cloudflare": "node scripts/setup-cloudflare.mjs",
     "dev": "mise run dev",
     "test": "mise run test"
@@ -79,19 +79,19 @@
         "description": "Static files in public/ (landing site, styles, browser bundles)."
       },
       "PUBLIC_URL": {
-        "description": "The URL people will use, e.g. https://cairn.example.com or your workers.dev URL. Passkeys and OAuth are bound to it: set it before anyone signs up."
+        "description": "Optional. Leave **empty**: the address you first open and claim Cairn at (your `workers.dev` URL, or a custom domain added later) becomes its URL, and Settings → Admin can move it. Set it (e.g. `https://cairn.example.com`) to pin the URL instead; passkeys are bound to it."
       },
       "APP_NAME": {
         "description": "Name shown in the app and on the consent page."
       },
       "OPEN_SIGNUP": {
-        "description": "\"true\" lets anyone sign up; \"false\" requires an invite link."
+        "description": "`false` (default): sign-up needs an invite link from an admin. `true`: anyone who finds the site can sign up."
       },
       "INBOUND_EMAIL_ADDRESS": {
-        "description": "Address for email capture (needs an Email Routing rule sending it to this Worker). Remove to turn email capture off."
+        "description": "Optional: address for email capture (needs an Email Routing rule sending it to this Worker). Unset: email capture is off."
       },
       "CAIRN_SETUP_TOKEN": {
-        "description": "Secret. Whoever presents it at sign-up or in Settings → Admin becomes an admin. Use a long random string."
+        "description": "Optional secret, not needed with the button: the first person to open the site claims it with a one-time code from the Worker's logs. If set, whoever presents it at sign-up or in Settings → Admin becomes an admin (and the claim page is off). Use a long random string."
       }
     }
   }

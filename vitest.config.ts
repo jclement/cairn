@@ -17,6 +17,7 @@ export default defineConfig(async () => {
             CAIRN_EMBED_ALARM: "off",
             CAIRN_TEST_HOOKS: "1",
             CAIRN_FAKE_CAPTURE_AI: "1",
+            CAIRN_UPDATE_CHECK: "off",
             CAIRN_SETUP_TOKEN: "test-setup-token-0123456789",
           },
         },

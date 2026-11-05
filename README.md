@@ -124,121 +124,88 @@ note in the light theme.
 
 ## Deploy your own
 
-About 15 minutes. You end up with Cairn at a URL you choose, and Claude connected to it.
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/jclement/cairn)
 
-### Prerequisites
+No terminal needed. You need a Cloudflare account and a GitHub account.
+[Workers Paid](https://developers.cloudflare.com/workers/platform/pricing/) ($5/month) is
+recommended. Everything Cairn uses exists on the Free plan, but Free allows 10 ms of CPU per
+request. Cairn hasn't been measured against that limit, and search, imports and exports can
+exceed it.
 
-- **A Cloudflare account.** [Workers Paid](https://developers.cloudflare.com/workers/platform/pricing/)
-  ($5/month) is recommended. Everything Cairn uses exists on the Free plan, but Free allows 10 ms
-  of CPU per request. Cairn hasn't been measured against that limit, and search, imports and
-  exports can exceed it.
-- **Node 24** (or [mise](https://mise.jdx.dev), which installs it from `mise.toml`), plus git
-  and openssl.
-- **Optional: a domain** whose DNS zone is on the same Cloudflare account. Without one, Cairn
-  runs at `https://cairn.<your-subdomain>.workers.dev`. You need a domain for email capture.
+1. **Click the button.** Cloudflare copies this repository into a new repository in your GitHub
+   account and lists what it will create: a D1 database, a KV namespace, an R2 bucket, a
+   Vectorize index, a Durable Object, rate limiters and Workers AI. The defaults are fine. Leave
+   `PUBLIC_URL` empty; sign-up is invite-only and email capture is off.
+2. **Deploy.** Cloudflare builds and deploys it (the build applies the database migrations).
+   Cairn is then live at `https://cairn.<your-subdomain>.workers.dev`.
+3. **Optional: add your own domain.** In the dashboard open **Workers & Pages → cairn →
+   Settings → Domains & Routes → Add → Custom domain** (its DNS zone must be on the same
+   account). Do it **before** step 4 and claim at that domain, because passkeys are bound to the
+   address you claim at.
+4. **Claim it.** Open the site. It shows **Claim this Cairn** and writes a one-time claim code
+   to the Worker's log: open **Workers & Pages → cairn → Logs** (live logs, or
+   `npx wrangler tail`) and find `Cairn claim code: XXXXX-XXXXX`. Enter it with a username and
+   create your passkey. You are the admin, the claim page is gone for good, and the address you
+   claimed at becomes Cairn's URL. Each code works for 30 minutes; **Write a new code to the
+   logs** makes another. Until someone claims the site it shows nothing else, so claim it right
+   after deploying.
 
-**Choose the URL first.** Passkeys are bound to the hostname in `PUBLIC_URL`, and OAuth metadata
-is built from it. If you change it after people sign up, every passkey stops working, and people
-can only get back in with recovery codes.
+Then save the 10 recovery codes it shows, add a second passkey (Settings → Account), invite
+people from Settings → Invites, and [connect Claude](#connect-claude-and-other-assistants).
 
-### 1. Get the code and log in
+**Updating.** Settings → Admin shows the running version and says when a newer Cairn is out. In
+your repository on GitHub open **Actions → Update Cairn → Run workflow**: it merges the latest
+`jclement/cairn` and pushes, and Cloudflare redeploys (if you forked instead, use **Sync fork**).
+See [Upgrading](#upgrading).
+
+**Moving to another address later.** Settings → Admin → This Cairn → *Move to another
+address*. Every existing passkey stops working; people sign in at the new address with a
+recovery code and add a new passkey. Setting `PUBLIC_URL` in your repository's
+`wrangler.jsonc` pins the URL instead (it always wins).
+
+### From the command line instead
+
+Needs **Node 24** (or [mise](https://mise.jdx.dev), which installs it from `mise.toml`) and git.
 
 ```sh
-git clone https://github.com/jclement/cairn.git
+git clone https://github.com/jclement/cairn.git      # or your fork
 cd cairn
 npm ci
 npx wrangler login
+npm run setup:cloudflare                                       # your workers.dev URL
+npm run setup:cloudflare -- --url https://cairn.example.com    # or pin a custom domain
 ```
 
-If you will deploy from CI, fork the repository first and clone your fork, so you can commit
-your `wrangler.jsonc`.
+`scripts/setup-cloudflare.mjs` is safe to run again. It:
 
-### 2a. One command
+1. checks the login;
+2. creates whatever doesn't exist yet: the D1 database `cairn`, the KV namespace `cairn-oauth`,
+   the Vectorize index `cairn-notes` (1024 dimensions, cosine) and the R2 bucket `cairn-files`;
+3. writes their ids, the sign-up policy (and with `--url` the route and `PUBLIC_URL`) into the
+   top level of your `wrangler.jsonc`;
+4. builds, applies the D1 migrations and deploys (`npm run deploy`).
 
-```sh
-npm run setup:cloudflare -- --url https://cairn.example.com    # a custom domain on your account
-npm run setup:cloudflare                                        # or: your workers.dev URL
-```
+Then claim the site as in step 4 above: run `npx wrangler tail` in another terminal and open
+the URL it prints.
 
-`scripts/setup-cloudflare.mjs` runs these steps, and is safe to run again:
+Options: `--open-signup` (anyone can sign up; default invite-only), `--email cairn@example.com`
+([email capture](#email-capture-optional)), `--setup-token` (also set a `CAIRN_SETUP_TOKEN`
+secret and print it once; whoever enters it at sign-up becomes an admin, and the claim page is
+off), `--dry-run` (show what exists and what would change).
 
-1. It checks the login.
-2. It creates whatever doesn't exist yet: the D1 database `cairn`, the KV namespace
-   `cairn-oauth`, the Vectorize index `cairn-notes` (1024 dimensions, cosine) and the R2 bucket
-   `cairn-files`.
-3. It writes their ids, `PUBLIC_URL`, the route and the sign-up policy into your
-   `wrangler.jsonc`.
-4. It builds, applies the D1 migrations and deploys. On workers.dev it reads the URL from the
-   deploy and deploys again with that URL.
-5. It generates `CAIRN_SETUP_TOKEN` and prints it once.
+**About `wrangler.jsonc`.** Its top level is the template the button and `setup:cloudflare`
+deploy, with no account ids in it. `env.owg` is the maintainer's own instance (deployed with
+`--env owg` only from `jclement/cairn`), and `env.local` is for local development; leave both
+alone. By hand instead of the script: create the four resources above, add `"database_id"` and
+the KV `"id"` to the top-level bindings (wrangler also finds the database by its name), and run
+`npm run deploy`. It runs `wrangler d1 migrations apply DB --remote`, then `wrangler deploy`.
 
-Options:
-
-- `--open-signup`: anyone can sign up. The default is invite-only; you get in with the setup
-  token.
-- `--email cairn@example.com`: email capture (see [Email capture](#email-capture-optional)).
-- `--dry-run`: show what exists and what would change, without changing anything.
-
-Then go to [First sign-in](#4-first-sign-in). The manual steps below do the same thing by hand.
-
-### 2b. By hand: create the resources
-
-```sh
-npx wrangler d1 create cairn
-npx wrangler kv namespace create cairn-oauth
-npx wrangler vectorize create cairn-notes --dimensions=1024 --metric=cosine
-npx wrangler r2 bucket create cairn-files
-```
-
-Keep the D1 `database_id` and the KV `id` they print. The Durable Object, rate limiters, Workers
-AI and static assets need no setup. The index must be 1024-dimensional, to match the default
-embedding model `@cf/qwen/qwen3-embedding-0.6b`.
-
-### 3. By hand: configure and deploy
-
-`wrangler.jsonc` in this repository holds the maintainer's instance at the top level. In your
-copy, change these top-level values (leave `env.local` alone; it is for local development):
-
-| Key | Set it to |
-|---|---|
-| `d1_databases[0].database_id` | your D1 id |
-| `kv_namespaces[0].id` | your KV id |
-| `routes` | `[{ "pattern": "cairn.example.com", "custom_domain": true }]`, or `[]` for workers.dev only |
-| `vars.PUBLIC_URL` | the exact URL people will use: `https://cairn.example.com` or `https://cairn.<subdomain>.workers.dev` |
-| `vars.OPEN_SIGNUP` | `"true"` for anyone, `"false"` for invite-only |
-| `vars.INBOUND_EMAIL_ADDRESS` | your capture address, or `""` to turn email capture off |
-
-To find your workers.dev subdomain, open the Cloudflare dashboard and go to **Workers & Pages**.
-The subdomain is shown there.
-
-Set the setup token, then migrate and deploy:
-
-```sh
-openssl rand -base64 32 | tee /dev/tty | npx wrangler secret put CAIRN_SETUP_TOKEN
-npm run deploy
-```
-
-`tee /dev/tty` shows the token once: save it in your password manager. `npm run deploy` builds
-the browser bundles and CSS, runs `wrangler d1 migrations apply DB --remote`, then
-`wrangler deploy`. `mise run deploy` does the same.
-
-Check the deployment:
+Check a deployment:
 
 ```sh
 curl https://cairn.example.com/health            # {"ok":true,"version":"…"}
-curl -i -X POST https://cairn.example.com/mcp    # 401 with a WWW-Authenticate header
+curl -i -X POST https://cairn.example.com/mcp    # 401 with a WWW-Authenticate header (503 until claimed)
 ```
-
-### 4. First sign-in
-
-1. Open `PUBLIC_URL` and choose **Sign up**. Pick a username and open **Setup token (admins
-   only)**. Paste the token, then create your passkey. The token makes you an admin, and it
-   lets you sign up even when sign-up is invite-only.
-2. Save the 10 recovery codes it shows. Each one signs you in once, to add a new passkey.
-3. Add a second passkey (Settings → Account), so losing one device isn't a recovery event.
-4. Invite people from Settings → Invites. Each person may hold `INVITES_PER_USER` (default 5)
-   open invite links, and admins have no limit. If you didn't use the token at sign-up, you can
-   become admin later in Settings → Admin.
 
 ### Email capture (optional)
 
@@ -275,9 +242,9 @@ To turn features off, set the model variable to `""`: `JEV_MODEL` for hints and 
 
 | `vars` key | In `wrangler.jsonc` | Meaning |
 |---|---|---|
-| `PUBLIC_URL` | (required) | The URL people use; passkeys and OAuth are bound to it |
+| `PUBLIC_URL` | `""` | Empty: the address the site is claimed at (Settings → Admin can move it). Set: pins the URL; passkeys and OAuth are bound to it |
 | `APP_NAME` | `Cairn` | Shown in the app and on the consent page |
-| `OPEN_SIGNUP` | `"true"` | `"false"` (or unset) makes sign-up invite-only |
+| `OPEN_SIGNUP` | `"false"` | `"true"` lets anyone sign up; otherwise sign-up needs an invite |
 | `INVITES_PER_USER` | `5` | Open invite links a non-admin may hold |
 | `IMPORT_ENABLED` | `"true"` | The .zip import in Settings → Import (off unless `"true"`) |
 | `SCHEMA_ENABLED` | `"true"` | The `check_schema` tool (off unless `"true"`) |
@@ -287,9 +254,10 @@ To turn features off, set the model variable to `""`: `JEV_MODEL` for hints and 
 | `VISION_MODEL` | (unset: `@cf/meta/llama-4-scout-17b-16e-instruct`) | Image captions; `""` turns them off |
 | `DIGEST_MODEL` | `@cf/google/gemma-4-26b-a4b-it` | The weekly digest |
 | `AI_DAILY_TOKENS` | `1000000` | Per-user daily AI budget |
-| `INBOUND_EMAIL_ADDRESS` | the maintainer's | Email capture address; `""` turns capture off |
+| `INBOUND_EMAIL_ADDRESS` | (unset) | Email capture address; unset or `""` turns capture off |
 
-The one secret is `CAIRN_SETUP_TOKEN`. `package.json` → `cloudflare.bindings` describes every
+There are no required secrets. The optional `CAIRN_SETUP_TOKEN` turns the claim page off:
+whoever enters it at sign-up or in Settings → Admin becomes an admin. `package.json` → `cloudflare.bindings` describes every
 binding. [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) has the long version of each step.
 
 ## Connect Claude and other assistants
@@ -339,12 +307,15 @@ with a revoke button.
 
 1. A `check` job runs `mise run check` (typecheck, lint, tests, probes).
 2. If that is green, a `deploy` job runs in the `production` environment. It runs
-   `mise run deploy` (migrations, then deploy) and smoke-tests `/health`, the OAuth metadata and
-   `/mcp` at the `PUBLIC_URL` in `wrangler.jsonc`.
+   `mise run deploy` (migrations, then `wrangler deploy --env owg`) and smoke-tests `/health`,
+   the OAuth metadata and `/mcp` at `env.owg`'s `PUBLIC_URL` in `wrangler.jsonc`.
 
-For your fork:
+Both jobs run only on `jclement/cairn`. A copy made by the Deploy button needs none of this:
+Cloudflare Workers Builds redeploys it on every push. To deploy a fork from Actions instead:
 
-1. Commit your `wrangler.jsonc` (ids, route and `PUBLIC_URL`; there are no secrets in it).
+1. Add your own environment to `wrangler.jsonc` (copy `env.owg`, with your ids, route,
+   `PUBLIC_URL` and a `name`), point the workflow's `if:` at your repository and `mise run
+   deploy` / the smoke test at your environment, and commit (there are no secrets in it).
 2. In GitHub, go to **Settings → Environments** and create `production`. Add a **secret**
    `CLOUDFLARE_API_TOKEN` and a **variable** `CLOUDFLARE_ACCOUNT_ID`. The account id is shown in
    the dashboard's account home and in `npx wrangler whoami`.
@@ -367,8 +338,8 @@ For your fork:
    report under [Troubleshooting](#troubleshooting)) reuses this token: it queries D1, reads the
    Vectorize index and lists deployments, all covered above.
 
-The secret `CAIRN_SETUP_TOKEN` is set once with `wrangler secret put`. It survives deploys, and
-CI never needs it.
+Secrets set with `wrangler secret put` (such as the optional `CAIRN_SETUP_TOKEN`) survive
+deploys, and CI never needs them.
 
 ## Costs and limits
 
@@ -427,14 +398,24 @@ The full threat model and how to report a vulnerability are in [docs/SECURITY.md
 
 ## Upgrading
 
-```sh
-git pull                 # or merge upstream into your fork
-npm ci
-npm run deploy           # applies new D1 migrations (migrations/), then deploys
-```
+Settings → Admin → This Cairn says when a newer release or newer commits on `jclement/cairn`
+exist (checked once a day; quiet if GitHub can't be reached).
 
-The Durable Objects upgrade their own SQLite schema on first use. With CI, pushing the merge to
-`main` does all of this. Read the commit log before jumping many versions.
+- **Deployed with the button:** GitHub → your repository → **Actions → Update Cairn → Run
+  workflow**. It merges `jclement/cairn` `main` into yours and pushes; Workers Builds redeploys,
+  applying new D1 migrations first. If it reports a merge conflict (usually `wrangler.jsonc`),
+  merge by hand: `git pull https://github.com/jclement/cairn.git main && git push`.
+- **A fork:** **Sync fork** on GitHub, or merge upstream yourself.
+- **From the command line:**
+
+  ```sh
+  git pull https://github.com/jclement/cairn.git main
+  npm ci
+  npm run deploy           # applies new D1 migrations (migrations/), then deploys
+  ```
+
+The Durable Objects upgrade their own SQLite schema on first use. Read the commit log before
+jumping many versions.
 
 ## Troubleshooting
 

@@ -1,0 +1,36 @@
+name: Update Cairn
+
+# For a copy of Cairn made by the Deploy to Cloudflare button (a new repository, not a GitHub
+# fork, so there is no "Sync fork" button): Actions → Update Cairn → Run workflow merges the latest
+# jclement/cairn main into this repository's main. Cloudflare Workers Builds sees the push and
+# redeploys (it runs `npm run deploy`, which applies the D1 migrations first).
+#
+# A merge conflict (usually wrangler.jsonc, if you edited lines that also changed upstream) stops
+# the run without pushing anything; merge by hand then:
+#   git pull https://github.com/jclement/cairn.git main && git push
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    if: github.repository != 'jclement/cairn'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Merge jclement/cairn main
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch https://github.com/jclement/cairn.git main
+          if git merge-base --is-ancestor FETCH_HEAD HEAD; then
+            echo "Already up to date."
+            exit 0
+          fi
+          git merge --no-edit --allow-unrelated-histories FETCH_HEAD -m "Update Cairn from jclement/cairn"
+          git push origin HEAD

@@ -37,6 +37,7 @@ import { safeNext } from "./next";
 import { escapeHtml } from "./render";
 import { registerRound2 } from "./round2";
 import { corePanel, registerRound3 } from "./round3";
+import { registerSite } from "./site";
 import type { AppEnv } from "./types";
 import { clientBadge, copyLine, emptyState, pageHeader, panel, settingsLayout, shellOpts } from "./ui";
 import { registerViewer } from "./viewer/routes";
@@ -826,6 +827,7 @@ export function createApp(opts: { verifier?: WebAuthnVerifier } = {}) {
   });
 
   registerRound2(app, page as never, loginRedirect);
+  registerSite(app, page as never);
   registerAccount(app, page as never, loginRedirect);
   registerImport(app, page as never, loginRedirect);
   registerFun(app, page as never, loginRedirect);

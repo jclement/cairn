@@ -21,6 +21,7 @@ import {
   USERNAME_RE,
 } from "../directory";
 import { openSignup, publicOrigin, rpId } from "../env";
+import { claimCodeValid, claimOpen, finishClaim, loadSite, recordCanonical, releaseClaim, takeClaim } from "../site";
 import { sha256Hex } from "../vault/embed";
 import { reauthFresh } from "../web/account";
 import type { AppEnv } from "../web/types";
@@ -54,10 +55,34 @@ export function authRoutes(verifier: WebAuthnVerifier) {
 
   // ---- sign up ----
   app.post("/signup/options", async (c) => {
-    const body = await c.req.json<{ username?: string; invite?: string; setupToken?: string }>().catch(() => ({}) as Record<string, string>);
+    const body = await c.req
+      .json<{ username?: string; invite?: string; setupToken?: string; claimCode?: string }>()
+      .catch(() => ({}) as Record<string, string>);
     const username = normaliseUsername(String(body.username ?? ""));
     if (!USERNAME_RE.test(username))
       return c.json({ error: "Usernames are 2-32 characters: letters, digits, dot, dash or underscore, starting with a letter or digit." }, 400);
+    // Not claimed yet: the only sign-up is the claim, with a live code from the Worker's log.
+    if (claimOpen(c.env, await loadSite(c.env))) {
+      if (!body.claimCode || !(await claimCodeValid(c.env, String(body.claimCode)))) {
+        await audit(c.env, null, "claim.fail", null, ip(c));
+        return c.json({ error: "That claim code isn't right or has expired. Get the current one from the Worker's logs." }, 403);
+      }
+      const options = await registrationOptions({
+        rpName: c.env.APP_NAME || "Cairn",
+        rpID: rpId(c.env),
+        userName: username,
+        userID: crypto.getRandomValues(new Uint8Array(16)),
+        exclude: [],
+      });
+      const challengeId = await storeChallenge(c, "signup", options.challenge, null, {
+        username,
+        invite: null,
+        admin: true,
+        claim: String(body.claimCode),
+        origin: publicOrigin(c.env),
+      });
+      return c.json({ challengeId, options });
+    }
     const setupOk = !!(c.env.CAIRN_SETUP_TOKEN && body.setupToken && safeEqual(body.setupToken, c.env.CAIRN_SETUP_TOKEN));
     const inviteOk = await inviteValid(c.env, body.invite);
     if (!openSignup(c.env) && !inviteOk && !setupOk) return c.json({ error: "Sign-up on this Cairn is by invitation. Ask an admin for an invite link." }, 403);
@@ -72,7 +97,9 @@ export function authRoutes(verifier: WebAuthnVerifier) {
     const body = await c.req.json<{ challengeId?: string; response?: unknown }>().catch(() => ({}) as Record<string, unknown>);
     const ch = await takeChallenge(c, body.challengeId, "signup");
     if (!ch) return c.json({ error: "This sign-up attempt expired. Start again." }, 400);
-    const { username, invite, admin } = ch.data as { username: string; invite: string | null; admin: boolean };
+    const { username, invite, admin, claim, origin } = ch.data as { username: string; invite: string | null; admin: boolean; claim?: string; origin?: string };
+    // A claim must finish on the origin it started on (it becomes the canonical URL).
+    if (claim && origin !== publicOrigin(c.env)) return c.json({ error: "This claim started at another address. Start again." }, 400);
     let cred: Awaited<ReturnType<WebAuthnVerifier["verifyRegistration"]>>;
     try {
       cred = await verifier.verifyRegistration({
@@ -89,6 +116,22 @@ export function authRoutes(verifier: WebAuthnVerifier) {
     // Claim the invite and create the account atomically when sign-up needs the invite.
     const needsInvite = !openSignup(c.env) && !admin;
     if (needsInvite && !invite) return c.json({ error: "Sign-up on this Cairn is by invitation." }, 403);
+    if (claim) {
+      if (!(await takeClaim(c.env, claim))) return c.json({ error: "This Cairn has already been claimed, or the claim code expired." }, 409);
+      const made = await createUser(c.env, username, true);
+      if (!made.ok) {
+        await releaseClaim(c.env);
+        return c.json({ error: "The claim could not be completed. Start again." }, 409);
+      }
+      if (c.env.CAIRN_URL_SOURCE === "request") await recordCanonical(c.env, publicOrigin(c.env));
+      await finishClaim(c.env);
+      await insertCredential(c.env, made.user.id, cred, "first passkey");
+      const codes = await issueRecoveryCodes(c.env, made.user.id);
+      const token = await createSession(c.env, made.user.id, { userAgent: c.req.header("user-agent") });
+      await audit(c.env, made.user.id, "claim", { origin: publicOrigin(c.env) }, ip(c));
+      c.header("Set-Cookie", sessionCookie(token));
+      return c.json({ ok: true, username: made.user.username, recoveryCodes: codes });
+    }
     // With an invite (required or not), claim it in the same transaction so invited_by is recorded.
     let created = await createUser(c.env, username, admin, invite ? { inviteCode: invite } : {});
     // Open sign-up: an invite someone else just used doesn't block joining, it just isn't credited.

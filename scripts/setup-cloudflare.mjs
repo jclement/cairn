@@ -6,18 +6,22 @@
 //   npm run setup:cloudflare                                         # your *.workers.dev URL
 //   npm run setup:cloudflare -- --dry-run                            # show what it would do
 //
-// Options: --url <https://host>   the URL people will use (a custom domain whose zone is on this
-//                                 Cloudflare account); without it, your workers.dev URL is used
+// (The no-terminal alternative is the Deploy to Cloudflare button in the README.)
+//
+// Options: --url <https://host>   pin the URL (a custom domain whose zone is on this Cloudflare
+//                                 account): sets PUBLIC_URL and the route. Without it, PUBLIC_URL
+//                                 stays empty and the address you claim the site at is recorded
 //          --email <address>      email capture address (needs an Email Routing rule, see README)
-//          --open-signup          anyone may sign up (default: invite-only; you join with the setup token)
-//          --rotate-token         generate a new CAIRN_SETUP_TOKEN even if one is set
+//          --open-signup          anyone may sign up (default: invite-only)
+//          --setup-token          also set a CAIRN_SETUP_TOKEN secret, printed once (instead of the
+//                                 claim code; --rotate-token replaces an existing one)
 //          --dry-run              read only: list what exists and what would change
 //
 // It: checks `wrangler whoami`; creates (or finds) the D1 database `cairn`, the KV namespace
 // `cairn-oauth`, the Vectorize index `cairn-notes` (1024 dimensions, cosine) and the R2 bucket
-// `cairn-files`; writes their ids, PUBLIC_URL, routes, sign-up policy and email address into
-// wrangler.jsonc (your copy; commit it to your fork); builds; applies the D1 migrations; deploys;
-// and sets CAIRN_SETUP_TOKEN, printing it once.
+// `cairn-files`; writes their ids, routes, sign-up policy, email address (and PUBLIC_URL with --url)
+// into the top level of wrangler.jsonc (your copy; commit it); builds; applies the D1 migrations;
+// deploys. Then you open the site and claim it with the one-time code from `npx wrangler tail`.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -97,8 +101,8 @@ if (vec && vec.config?.dimensions && vec.config.dimensions !== 1024) {
 const before = readFileSync(CONFIG, "utf8");
 if (DRY) {
   step("Dry run: nothing was created or changed");
-  say(`wrangler.jsonc would get: PUBLIC_URL=${url ?? "<your workers.dev URL, found by the first deploy>"}, routes=${url ? `custom domain ${new URL(url).host}` : "none (workers.dev)"}, OPEN_SIGNUP=${flag("open-signup")}, INBOUND_EMAIL_ADDRESS=${email || "(off)"}`);
-  say(`currently: PUBLIC_URL=${publicUrlOf(before)}`);
+  say(`wrangler.jsonc would get: PUBLIC_URL=${url ?? "(empty: recorded when you claim the site)"}, routes=${url ? `custom domain ${new URL(url).host}` : "none (workers.dev)"}, OPEN_SIGNUP=${flag("open-signup")}, INBOUND_EMAIL_ADDRESS=${email || "(off)"}`);
+  say(`currently: PUBLIC_URL=${publicUrlOf(before) || "(empty)"}`);
   process.exit(0);
 }
 
@@ -111,27 +115,26 @@ const kvId = kv?.id ?? wranglerJson(["kv", "namespace", "list"]).find(isKv)?.id;
 if (!d1Id || !kvId) throw new Error("couldn't read back the D1 or KV id");
 
 step("Writing your instance into wrangler.jsonc");
-// Without --url the workers.dev URL isn't known until the first deploy; start with a placeholder.
-let config = setInstanceValues(before, {
+// Without --url, PUBLIC_URL is left as it is (empty in the template): the claim records the URL.
+const config = setInstanceValues(before, {
   d1Id,
   kvId,
-  publicUrl: url ?? "https://cairn.invalid",
+  ...(url ? { publicUrl: url } : {}),
   customDomain: url ? new URL(url).host : null,
   email,
   openSignup: flag("open-signup"),
 });
 writeFileSync(CONFIG, config);
-say("done (commit wrangler.jsonc to your fork so CI deploys the same instance)");
+say("done (commit wrangler.jsonc so later deploys reach the same instance)");
 
-step("Building and applying the D1 migrations");
+step("Building");
 run("npm", ["run", "build"]);
-run("npx", ["wrangler", "d1", "migrations", "apply", "DB", "--remote"]);
 
-step("Deploying");
+step("Applying the D1 migrations and deploying");
 // wrangler writes structured results (including the deployed URLs) to this file; the console
 // stays interactive, so its own prompts (e.g. registering a workers.dev subdomain) still work.
 const outFile = join(mkdtempSync(join(tmpdir(), "cairn-setup-")), "wrangler-output.ndjson");
-run("npx", ["wrangler", "deploy"], { WRANGLER_OUTPUT_FILE_PATH: outFile });
+run("node", ["scripts/deploy.mjs"], { WRANGLER_OUTPUT_FILE_PATH: outFile });
 if (!url) {
   const targets = readFileSync(outFile, "utf8")
     .split("\n")
@@ -140,28 +143,30 @@ if (!url) {
     .filter((e) => e.type === "deploy")
     .flatMap((e) => e.targets ?? []);
   const found = targets.find((t) => /^https:\/\/[a-z0-9.-]+\.workers\.dev$/i.test(t));
-  if (!found) throw new Error("couldn't find the workers.dev URL in wrangler's output; rerun with --url https://<your URL>");
-  url = found.toLowerCase();
-  say(`your URL: ${url}; setting PUBLIC_URL and deploying again`);
-  config = setInstanceValues(config, { publicUrl: url });
-  writeFileSync(CONFIG, config);
-  run("npx", ["wrangler", "deploy"]);
+  url = found ? found.toLowerCase() : "https://<your worker>.workers.dev";
 }
 
-step("Setup token");
 let haveToken = false;
-try {
-  haveToken = wranglerJson(["secret", "list", "--format", "json"]).some((s) => s.name === "CAIRN_SETUP_TOKEN");
-} catch {}
-if (haveToken && !flag("rotate-token")) {
-  say("CAIRN_SETUP_TOKEN is already set (kept; --rotate-token makes a new one)");
-} else {
-  const token = randomBytes(32).toString("base64url");
-  wrangler(["secret", "put", "CAIRN_SETUP_TOKEN"], { input: token, quiet: true });
-  console.log(`\n  CAIRN_SETUP_TOKEN = ${token}\n  Save it in your password manager now; it is not shown again. Whoever enters it at sign-up becomes an admin.`);
+if (flag("setup-token") || flag("rotate-token")) {
+  step("Setup token");
+  try {
+    haveToken = wranglerJson(["secret", "list", "--format", "json"]).some((s) => s.name === "CAIRN_SETUP_TOKEN");
+  } catch {}
+  if (haveToken && !flag("rotate-token")) {
+    say("CAIRN_SETUP_TOKEN is already set (kept; --rotate-token makes a new one)");
+  } else {
+    const token = randomBytes(32).toString("base64url");
+    wrangler(["secret", "put", "CAIRN_SETUP_TOKEN"], { input: token, quiet: true });
+    haveToken = true;
+    console.log(`\n  CAIRN_SETUP_TOKEN = ${token}\n  Save it in your password manager now; it is not shown again. Whoever enters it at sign-up becomes an admin.`);
+  }
 }
 
 step("Done");
-say(`Open ${url}/signup, open "Setup token (admins only)", paste the token, and create your passkey.`);
+if (haveToken) say(`Open ${url}/signup, open "Setup token (admins only)", paste the token, and create your passkey.`);
+else {
+  say(`Claim your Cairn: run \`npx wrangler tail\` in another terminal, open ${url}, and enter the one-time`);
+  say("claim code it prints (also under Worker → Logs in the Cloudflare dashboard). You become the admin.");
+}
 say(`Then connect Claude: the MCP URL is ${url}/mcp (README → Connect Claude).`);
 say(`Check: curl ${url}/health`);

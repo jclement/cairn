@@ -13,7 +13,39 @@ describe("setup-cloudflare: wrangler.jsonc editing", () => {
   it("parses the shipped config", () => {
     expect(original.name).toBe("cairn");
     expect(original.env.local.vars.PUBLIC_URL).toBe("http://localhost:8787");
-    expect(publicUrlOf(wranglerConfig)).toMatch(/^https:\/\//);
+  });
+
+  it("the top level is a clean template for the Deploy button", () => {
+    expect(original.d1_databases).toEqual([{ binding: "DB", database_name: "cairn", migrations_dir: "migrations" }]);
+    expect(original.kv_namespaces).toEqual([{ binding: "OAUTH_KV" }]);
+    expect(original.r2_buckets).toEqual([{ binding: "FILES", bucket_name: "cairn-files" }]);
+    expect(original.vectorize).toEqual([{ binding: "VECTORIZE", index_name: "cairn-notes" }]);
+    expect(original.routes).toEqual([]);
+    expect(original.vars.PUBLIC_URL).toBe("");
+    expect(original.vars.OPEN_SIGNUP).toBe("false");
+    expect(original.vars.INBOUND_EMAIL_ADDRESS).toBeUndefined();
+    const top = JSON.stringify({ ...original, env: undefined });
+    expect(top).not.toMatch(/onewheelgeek|1f6a766f|0e9cb5d7/);
+  });
+
+  it("env.owg is the maintainer's live instance: same Worker name, Durable Object class and every binding", () => {
+    const owg = original.env.owg;
+    expect(owg.name).toBe("cairn");
+    expect(owg.durable_objects).toEqual(original.durable_objects);
+    expect(owg.migrations).toEqual(original.migrations);
+    expect(owg.d1_databases[0].database_id).toMatch(/^1f6a766f-/);
+    expect(owg.kv_namespaces[0].id).toMatch(/^0e9cb5d7/);
+    expect(owg.routes).toEqual([{ pattern: "cairn.onewheelgeek.net", custom_domain: true }]);
+    expect(owg.triggers).toEqual(original.triggers);
+    for (const k of ["r2_buckets", "vectorize", "ai", "ratelimits", "assets"]) expect(owg[k], k).toEqual(original[k]);
+    expect(Object.keys(owg.vars).sort()).toEqual([...Object.keys(original.vars), "INBOUND_EMAIL_ADDRESS"].sort());
+  });
+
+  it("publicUrlOf reads env.owg for the CI smoke test, and the template's (empty) top level otherwise", () => {
+    expect(publicUrlOf(wranglerConfig, "owg")).toBe("https://cairn.onewheelgeek.net");
+    expect(publicUrlOf(wranglerConfig, "local")).toBe("http://localhost:8787");
+    expect(publicUrlOf(wranglerConfig)).toBe("");
+    expect(publicUrlOf(wranglerConfig, "nope")).toBe("");
   });
 
   it("sets a custom-domain instance at the top level only", () => {
@@ -30,7 +62,7 @@ describe("setup-cloudflare: wrangler.jsonc editing", () => {
     expect(c.kv_namespaces[0].id).toBe("abcdefabcdefabcdefabcdefabcdefab");
     expect(c.vars.PUBLIC_URL).toBe("https://cairn.example.com");
     expect(c.vars.OPEN_SIGNUP).toBe("false");
-    expect(c.vars.INBOUND_EMAIL_ADDRESS).toBe("");
+    expect(c.vars.INBOUND_EMAIL_ADDRESS).toBeUndefined();
     expect(c.routes).toEqual([{ pattern: "cairn.example.com", custom_domain: true }]);
     // env.local and everything else untouched; comments kept.
     expect(c.env).toEqual(original.env);
@@ -39,7 +71,17 @@ describe("setup-cloudflare: wrangler.jsonc editing", () => {
     expect(c.ratelimits).toEqual(original.ratelimits);
     expect(text.split("\n").filter((l) => l.trim().startsWith("//")).length).toBe(wranglerConfig.split("\n").filter((l) => l.trim().startsWith("//")).length);
     // Idempotent.
-    expect(setInstanceValues(text, { publicUrl: "https://cairn.example.com", customDomain: "cairn.example.com" })).toBe(text);
+    expect(
+      setInstanceValues(text, { publicUrl: "https://cairn.example.com", customDomain: "cairn.example.com", d1Id: "11111111-2222-3333-4444-555555555555" }),
+    ).toBe(text);
+    // env.owg keeps its own ids
+    expect(c.env.owg.d1_databases[0].database_id).toBe(original.env.owg.d1_databases[0].database_id);
+  });
+
+  it("inserts an email address into the template's vars", () => {
+    const c = parseJsonc(setInstanceValues(wranglerConfig, { email: "cairn@example.com" }));
+    expect(c.vars.INBOUND_EMAIL_ADDRESS).toBe("cairn@example.com");
+    expect(c.env).toEqual(original.env);
   });
 
   it("sets a workers.dev instance: no routes", () => {
@@ -63,7 +105,7 @@ describe("setup-cloudflare: wrangler.jsonc editing", () => {
 });
 
 describe("public docs carry no maintainer instance values", () => {
-  const ids = [original().d1_databases[0].database_id, original().kv_namespaces[0].id].filter((id: string) => id && id !== "local");
+  const ids = [original().env.owg.d1_databases[0].database_id, original().env.owg.kv_namespaces[0].id].filter((id: string) => id && id !== "local");
   for (const [name, text] of [
     ["README.md", readme],
     ["docs/SELF-HOSTING.md", selfHosting],

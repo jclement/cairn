@@ -1,7 +1,10 @@
 name: Deploy
 
 # Every push to main is checked (lint + tests) and, if green, deployed to Cloudflare
-# (remote D1 migrations, then `wrangler deploy`) — the same mise tasks used locally.
+# (remote D1 migrations, then `wrangler deploy --env owg`) — the same mise tasks used locally.
+# Deploying runs only on jclement/cairn (the maintainer's instance, wrangler env `owg`). A copy made
+# by the Deploy to Cloudflare button deploys through Workers Builds instead; a fork that wants
+# this workflow points the `if:` and `mise run deploy` at its own environment.
 on:
   push:
     branches: [main]
@@ -27,6 +30,7 @@ jobs:
 
   deploy:
     needs: check
+    if: github.repository == 'jclement/cairn'
     runs-on: ubuntu-24.04
     environment: production
     env:
@@ -41,8 +45,8 @@ jobs:
       - name: Smoke test
         run: |
           set -e
-          # The instance's URL is PUBLIC_URL in wrangler.jsonc, so a fork smoke-tests its own.
-          URL=$(node --input-type=module -e 'import { readFileSync } from "node:fs"; import { publicUrlOf } from "./scripts/lib/wrangler-config.mjs"; console.log(publicUrlOf(readFileSync("wrangler.jsonc", "utf8")))')
+          # The instance's URL is env.owg's PUBLIC_URL in wrangler.jsonc.
+          URL=$(node --input-type=module -e 'import { readFileSync } from "node:fs"; import { publicUrlOf } from "./scripts/lib/wrangler-config.mjs"; console.log(publicUrlOf(readFileSync("wrangler.jsonc", "utf8"), "owg"))')
           for i in 1 2 3 4 5 6; do curl -fsS "$URL/health" && break; sleep 10; done
           curl -fsS -o /dev/null "$URL/.well-known/oauth-authorization-server"
           curl -fsS -o /dev/null "$URL/.well-known/oauth-protected-resource/mcp"

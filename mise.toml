@@ -29,7 +29,7 @@ depends = ["build:client"]
 run = "npx vitest run"
 
 [tasks."prod:status"]
-description = "Production health: deployed version, migrations, AI failure rates, cron, counts, stuck imports, email, Vectorize. Needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID; exits 1 on a red flag"
+description = "Production health (the maintainer's instance, wrangler env `owg`; another instance: --env <name>): deployed version, migrations, AI failure rates, cron, counts, stuck imports, email, Vectorize. Needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID; exits 1 on a red flag"
 run = "node scripts/prod-status.mjs"
 
 [tasks."plugin:sync"]
@@ -53,12 +53,22 @@ description = "Adversarial parser probes under an isolated deadline (a worker th
 run = "node scripts/probe-schema-parser.mjs"
 
 [tasks.deploy]
-description = "Apply remote D1 migrations, then deploy (CI does this on every push to main)"
+description = "Apply remote D1 migrations, then deploy the maintainer's instance (wrangler env `owg`; CI does this on every push to main of jclement/cairn). Your own instance: `mise run deploy:self`"
 depends = ["build:client"]
-run = ["npx wrangler d1 migrations apply DB --remote", "npx wrangler deploy"]
+run = "node scripts/deploy.mjs --env owg"
+
+[tasks."deploy:self"]
+description = "Apply remote D1 migrations, then deploy the top-level (template) config: your own instance from a fork or clone"
+depends = ["build:client"]
+run = "node scripts/deploy.mjs"
+
+[tasks."migrate:remote"]
+description = "Apply D1 migrations to the maintainer's instance's remote database (wrangler env `owg`)"
+env = { CI = "true" }
+run = "npx wrangler d1 migrations apply DB --remote --env owg"
 
 [tasks."setup:cloudflare"]
-description = "One-command setup of your own instance: create the Cloudflare resources, write their ids and your URL into wrangler.jsonc, migrate, deploy, set the setup token. Args: --url https://cairn.example.com, --email, --open-signup, --dry-run"
+description = "One-command setup of your own instance from the CLI (the alternative to the Deploy button): create the Cloudflare resources, write their ids (and --url, if given) into wrangler.jsonc's top level, migrate, deploy. Args: --url https://cairn.example.com, --email, --open-signup, --setup-token, --dry-run"
 run = "node scripts/setup-cloudflare.mjs"
 
 [tasks."oauth:live"]
@@ -66,7 +76,7 @@ description = "Live OAuth client-compatibility test: Claude Code, claude.ai and 
 run = "node scripts/oauth-live.mjs"
 
 [tasks."smoke:live"]
-description = "End-to-end smoke test against the live site (virtual passkey; creates and deletes a throwaway account)"
+description = "End-to-end smoke test against the live site (CAIRN_URL, default the maintainer's instance, env `owg`) (virtual passkey; creates and deletes a throwaway account)"
 run = "node scripts/smoke-live.mjs"
 
 [tasks."jev:eval"]
