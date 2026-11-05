@@ -1,0 +1,24 @@
+From: Bob <bob@example.net>
+To: cairn@example.test
+Subject: [k:{{KEY}}] Receipt and diagram
+Date: Tue, 03 Nov 2026 11:00:00 +0000
+Message-ID: <html-{{NONCE}}@example.net>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="XYZ"
+
+--XYZ
+Content-Type: text/html; charset=utf-8
+
+<html><body><h2>Hello</h2><p>See <a href="https://example.org/r">the receipt</a> and <b>diagram</b>.</p><script>alert(1)</script><img src="cid:dot"></body></html>
+--XYZ
+Content-Type: image/png; name="dot.png"
+Content-Disposition: attachment; filename="dot.png"
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+--XYZ
+Content-Type: image/svg+xml; name="evil.svg"
+Content-Disposition: attachment; filename="evil.svg"
+
+<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(2)</script></svg>
+--XYZ--

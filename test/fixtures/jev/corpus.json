@@ -1,0 +1,215 @@
+{
+  "about": "Synthetic notes for tuning Jev (scripts/jev-eval.mjs). Invented people, projects and facts; no real user data.",
+  "notes": [
+    {
+      "permalink": "people/dana-roe",
+      "title": "Dana Roe",
+      "type": "person",
+      "body": "# Dana Roe\n\nProduct manager at Larkspur Water.\n\n## Observations\n- [role] Product manager for the billing portal #work\n- [contact] Prefers email over phone calls\n- [preference] Likes meetings before 10am\n\n## Relations\n- works_at [[Larkspur Water]]\n- leads [[Billing Portal Redesign]]"
+    },
+    {
+      "permalink": "orgs/larkspur-water",
+      "title": "Larkspur Water",
+      "type": "organization",
+      "body": "# Larkspur Water\n\nRegional water utility; our biggest client.\n\n## Observations\n- [client] Contract renews every March\n- [contact] Main contact is Dana Roe\n- [billing] Invoices go to accounts@larkspur.example, net 30\n\n## Relations\n- employs [[Dana Roe]]"
+    },
+    {
+      "permalink": "projects/billing-portal-redesign",
+      "title": "Billing Portal Redesign",
+      "type": "project",
+      "body": "# Billing Portal Redesign\n\nRebuilding Larkspur's customer billing portal.\n\n## Observations\n- [status] In development, beta planned for June\n- [deadline] Beta launch on 2026-06-15\n- [stack] SvelteKit front end, Postgres, Stripe for card payments\n- [risk] The legacy meter-reading export is undocumented\n\n## Relations\n- for [[Larkspur Water]]\n- led_by [[Dana Roe]]"
+    },
+    {
+      "permalink": "decisions/use-postgres-for-portal",
+      "title": "Use Postgres for the portal",
+      "type": "decision",
+      "body": "# Use Postgres for the portal\n\n## Observations\n- [decision] Chose Postgres over MongoDB for the billing portal\n- [reason] Billing data is relational and needs transactions\n- [date] Decided 2026-02-03 with Dana Roe"
+    },
+    {
+      "permalink": "recipes/sourdough",
+      "title": "Sourdough loaf",
+      "type": "recipe",
+      "body": "# Sourdough loaf\n\n## Observations\n- [ingredients] 500 g bread flour, 350 g water, 100 g starter, 10 g salt\n- [method] Bulk ferment 5 hours at 24 C, shape, cold proof overnight\n- [bake] 250 C in a Dutch oven, 20 min lid on, 25 min lid off"
+    },
+    {
+      "permalink": "recipes/pancakes",
+      "title": "Weekend pancakes",
+      "type": "recipe",
+      "body": "# Weekend pancakes\n\n## Observations\n- [ingredients] 2 cups flour, 2 eggs, 1.5 cups buttermilk, 2 tbsp sugar\n- [tip] Rest the batter for 10 minutes before cooking\n- [preference] Kids like blueberries in them"
+    },
+    {
+      "permalink": "home/furnace",
+      "title": "Furnace maintenance",
+      "type": "note",
+      "body": "# Furnace maintenance\n\n## Observations\n- [model] Lennox ML180, installed 2019\n- [filter] Uses 16x25x1 filters, replace every 3 months\n- [service] Annual service by Northside Heating in October"
+    },
+    {
+      "permalink": "home/car",
+      "title": "Car: 2018 Subaru Outback",
+      "type": "note",
+      "body": "# Car: 2018 Subaru Outback\n\n## Observations\n- [maintenance] Oil change every 8,000 km, synthetic 0W-20\n- [tires] Winter tires go on in late October\n- [insurance] Policy renews in August"
+    },
+    {
+      "permalink": "travel/japan-2027",
+      "title": "Japan trip 2027",
+      "type": "plan",
+      "body": "# Japan trip 2027\n\n## Observations\n- [dates] Two weeks in April 2027 for cherry blossoms\n- [route] Tokyo, Kyoto, Hiroshima, Osaka\n- [budget] About 9,000 CAD for two people\n- [todo] Book the Kyoto ryokan six months ahead"
+    },
+    {
+      "permalink": "travel/packing-list",
+      "title": "Packing list",
+      "type": "checklist",
+      "body": "# Packing list\n\n- passport\n- phone charger and plug adapter\n- rain jacket\n- medications\n- hiking boots"
+    },
+    {
+      "permalink": "people/sam-okafor",
+      "title": "Sam Okafor",
+      "type": "person",
+      "body": "# Sam Okafor\n\nNeighbour and running partner.\n\n## Observations\n- [hobby] Training for the Calgary half marathon\n- [schedule] Runs Tuesday and Saturday mornings\n- [family] Two kids, Ada and Ben"
+    },
+    {
+      "permalink": "people/priya-shah",
+      "title": "Priya Shah",
+      "type": "person",
+      "body": "# Priya Shah\n\nBackend engineer on the portal team.\n\n## Observations\n- [role] Owns the payments integration\n- [skill] Expert in Postgres performance tuning\n- [timezone] Works from Lisbon, UTC+0"
+    },
+    {
+      "permalink": "code/deploy-runbook",
+      "title": "Deploy runbook",
+      "type": "runbook",
+      "body": "# Deploy runbook\n\n## Observations\n- [deploy] Merge to main triggers CI, which deploys to staging\n- [deploy] Production deploy is a manual approval in the pipeline\n- [rollback] Revert the merge commit and redeploy; migrations must be backward compatible"
+    },
+    {
+      "permalink": "code/flaky-tests",
+      "title": "Flaky test log",
+      "type": "note",
+      "body": "# Flaky test log\n\n## Observations\n- [flaky] checkout.spec times out on CI when the Stripe mock is slow\n- [fix] Raised the Stripe mock timeout to 10 s on 2026-03-12\n- [flaky] calendar.spec fails across daylight saving changes"
+    },
+    {
+      "permalink": "code/api-rate-limits",
+      "title": "API rate limits",
+      "type": "note",
+      "body": "# API rate limits\n\n## Observations\n- [limit] Public API allows 100 requests per minute per key\n- [limit] Webhooks retry 5 times with exponential backoff\n- [decision] Rate limits enforced at the edge, not in the app"
+    },
+    {
+      "permalink": "health/running-plan",
+      "title": "Running plan",
+      "type": "plan",
+      "body": "# Running plan\n\n## Observations\n- [goal] Run a sub-2-hour half marathon in September\n- [schedule] Long run on Saturdays, intervals on Tuesdays\n- [shoes] Replace running shoes every 700 km"
+    },
+    {
+      "permalink": "reading/thinking-fast-and-slow",
+      "title": "Thinking, Fast and Slow",
+      "type": "book",
+      "body": "# Thinking, Fast and Slow\n\n## Observations\n- [idea] System 1 is fast and intuitive; System 2 is slow and deliberate\n- [idea] Anchoring: first numbers seen bias later estimates\n- [rating] 4 of 5, dense in the middle"
+    },
+    {
+      "permalink": "reading/deep-work",
+      "title": "Deep Work",
+      "type": "book",
+      "body": "# Deep Work\n\n## Observations\n- [idea] Schedule long blocks of distraction-free focus\n- [practice] Shut down email after 4pm\n- [rating] 3 of 5, repetitive"
+    },
+    {
+      "permalink": "research/heat-pumps",
+      "title": "Heat pump research",
+      "type": "research",
+      "body": "# Heat pump research\n\n## Observations\n- [finding] Cold-climate heat pumps keep working down to about -25 C\n- [cost] Quotes ranged from 14,000 to 21,000 CAD installed\n- [rebate] Federal grant covers up to 5,000 CAD\n- [question] Do we keep the furnace as backup?"
+    },
+    {
+      "permalink": "research/solar-panels",
+      "title": "Solar panel research",
+      "type": "research",
+      "body": "# Solar panel research\n\n## Observations\n- [finding] South roof fits about 8 kW of panels\n- [cost] Payback estimated at 11 years\n- [constraint] Roof needs replacing within 5 years"
+    },
+    {
+      "permalink": "family/school-calendar",
+      "title": "School calendar",
+      "type": "note",
+      "body": "# School calendar\n\n## Observations\n- [dates] Spring break is March 23 to 27\n- [dates] Last day of school is June 26\n- [event] Parent-teacher interviews on November 14"
+    },
+    {
+      "permalink": "family/allergies",
+      "title": "Family allergies",
+      "type": "note",
+      "body": "# Family allergies\n\n## Observations\n- [allergy] Ben is allergic to tree nuts\n- [allergy] Mia gets hay fever in May\n- [action] Epipen in the kitchen drawer"
+    },
+    {
+      "permalink": "money/budget-2026",
+      "title": "Household budget 2026",
+      "type": "note",
+      "body": "# Household budget 2026\n\n## Observations\n- [budget] Groceries 1,200 CAD per month\n- [budget] Savings target 20 percent of take-home pay\n- [goal] Pay off the car loan by December"
+    },
+    {
+      "permalink": "money/taxes",
+      "title": "Taxes",
+      "type": "note",
+      "body": "# Taxes\n\n## Observations\n- [deadline] Personal returns due April 30\n- [accountant] Uses Marlow & Co for the business return\n- [rrsp] RRSP contribution deadline is March 1"
+    },
+    {
+      "permalink": "meetings/2026-04-02-larkspur-sync",
+      "title": "Larkspur sync 2026-04-02",
+      "type": "meeting",
+      "body": "# Larkspur sync 2026-04-02\n\nWith Dana Roe and Priya Shah.\n\n## Observations\n- [decision] Move the beta to 2026-07-01 because of the meter export\n- [action] Priya to document the legacy export by April 20\n- [concern] Dana worried about summer staff holidays"
+    },
+    {
+      "permalink": "garden/vegetable-plan",
+      "title": "Vegetable garden plan",
+      "type": "plan",
+      "body": "# Vegetable garden plan\n\n## Observations\n- [plant] Tomatoes, zucchini, beans and garlic\n- [timing] Plant out after May 24 (last frost)\n- [lesson] Zucchini needs more space than last year"
+    },
+    {
+      "permalink": "tech/home-network",
+      "title": "Home network",
+      "type": "note",
+      "body": "# Home network\n\n## Observations\n- [router] UniFi Dream Router in the basement\n- [wifi] Guest network is called maple-guest\n- [backup] NAS backs up nightly to an offsite bucket"
+    },
+    {
+      "permalink": "tech/password-manager",
+      "title": "Password manager",
+      "type": "note",
+      "body": "# Password manager\n\n## Observations\n- [tool] Family uses a shared password vault\n- [policy] Every account gets two-factor where available\n- [recovery] Recovery kit printed and stored in the safe"
+    },
+    {
+      "permalink": "people/maria-lopez",
+      "title": "Maria Lopez",
+      "type": "person",
+      "body": "# Maria Lopez\n\nFormer manager, now a mentor.\n\n## Observations\n- [advice] Write the decision down before the meeting ends\n- [contact] Coffee once a quarter\n- [role] VP Engineering at Northwind"
+    },
+    {
+      "permalink": "ideas/side-project-ideas",
+      "title": "Side project ideas",
+      "type": "note",
+      "body": "# Side project ideas\n\n## Observations\n- [idea] A plant-watering reminder that reads soil sensors\n- [idea] Turn the sourdough schedule into a timer app\n- [idea] Habit tracker for running and reading"
+    },
+    {
+      "permalink": "home/oven-repair",
+      "title": "Oven repair",
+      "type": "note",
+      "body": "# Oven repair\n\n## Observations\n- [appliance] Oven temperature sensor replaced in January\n- [quirk] The oven still runs about 10 C hot, so set it a little lower\n- [warranty] Repair covered for 90 days"
+    },
+    {
+      "permalink": "research/payment-providers",
+      "title": "Payment provider comparison",
+      "type": "research",
+      "body": "# Payment provider comparison\n\n## Observations\n- [option] Stripe: easy API, 2.9 percent plus 30 cents per card payment\n- [option] Adyen: cheaper at volume, harder onboarding\n- [decision] Stay with Stripe until volume doubles"
+    },
+    {
+      "permalink": "travel/trip-ideas",
+      "title": "Trip ideas",
+      "type": "note",
+      "body": "# Trip ideas\n\n## Observations\n- [idea] Canoe trip in Algonquin park\n- [idea] Long weekend in Banff in winter\n- [idea] Visit Lisbon and Porto"
+    },
+    {
+      "permalink": "projects/beta-feedback-plan",
+      "title": "Beta feedback plan",
+      "type": "plan",
+      "body": "# Beta feedback plan\n\n## Observations\n- [method] Collect beta feedback through an in-app form\n- [owner] Support team triages feedback weekly\n- [metric] Target 50 responses in the first month"
+    },
+    {
+      "permalink": "reading/newsletters",
+      "title": "Newsletters I read",
+      "type": "note",
+      "body": "# Newsletters I read\n\n## Observations\n- [list] A weekly engineering newsletter and a cooking newsletter\n- [habit] Read email newsletters on Sunday mornings\n- [cleanup] Unsubscribe from anything unread for a month"
+    }
+  ]
+}

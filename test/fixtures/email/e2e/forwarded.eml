@@ -1,0 +1,28 @@
+From: Jeff Example <{{FROM}}>
+To: {{TO}}
+Subject: {{SUBJECT_PREFIX}}Fwd: Contract renewal terms
+Date: Wed, 4 Nov 2026 10:02:11 -0700
+Message-ID: <fwd-{{NONCE}}@mail.example.org>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="fwdboundary"
+
+--fwdboundary
+Content-Type: text/plain; charset=utf-8
+
+Keep this one for the renewal.
+
+--fwdboundary
+Content-Type: message/rfc822
+Content-Disposition: inline
+
+From: Legal Team <legal@northwind.example>
+To: Jeff Example <jeff@example.org>
+Subject: Contract renewal terms
+Date: Mon, 2 Nov 2026 16:40:00 -0500
+Message-ID: <orig-{{NONCE}}@northwind.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Renewal is 12 months at the current rate. FORWARDED-BODY-MARKER
+
+--fwdboundary--

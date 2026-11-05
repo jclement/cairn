@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cairn — Memory for your AI. It is going to change your life.</title>
+<meta name="description" content="Cairn is a self-hostable memory system for AI assistants: markdown notes you own, hybrid search, passkey sign-in, and a remote MCP server for claude.ai and Claude Code. Also, it will change your life.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#07060c">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/landing/style.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Cairn — Your AI forgets everything. Cairn doesn't.">
+<meta property="og:description" content="The cinematic, mission-critical, markdown-native memory layer for your AI. It stores notes. It is going to change your life.">
+<meta property="og:image" content="https://cairn.onewheelgeek.net/landing/og.jpg">
+<meta property="og:url" content="https://cairn.onewheelgeek.net/">
+<meta name="twitter:card" content="summary_large_image">
+<script src="/landing/site.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="g-brand" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#ff8a3d"/><stop offset=".5" stop-color="#ff3d8b"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient>
+    <symbol id="i-cairn" viewBox="0 0 64 64"><g fill="url(#g-brand)"><ellipse cx="32" cy="52" rx="22" ry="8"/><ellipse cx="31" cy="38.5" rx="16" ry="6.5"/><ellipse cx="33" cy="27" rx="11.5" ry="5.2"/><ellipse cx="32" cy="17.5" rx="7.5" ry="4"/></g><circle cx="32" cy="8.5" r="2.8" fill="currentColor"/></symbol>
+    <symbol id="i-laurel" viewBox="0 0 80 80"><g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M24 64C12 54 9 38 16 22"/><path d="M56 64c12-10 15-26 8-42"/></g><g fill="currentColor"><ellipse cx="14" cy="30" rx="3" ry="6.5" transform="rotate(-25 14 30)"/><ellipse cx="13" cy="42" rx="3" ry="6.5" transform="rotate(-50 13 42)"/><ellipse cx="18" cy="53" rx="3" ry="6.5" transform="rotate(-70 18 53)"/><ellipse cx="66" cy="30" rx="3" ry="6.5" transform="rotate(25 66 30)"/><ellipse cx="67" cy="42" rx="3" ry="6.5" transform="rotate(50 67 42)"/><ellipse cx="62" cy="53" rx="3" ry="6.5" transform="rotate(70 62 53)"/><path d="M40 20l5 10.2 11.2 1.6-8.1 7.9 1.9 11.2L40 45.6l-10 5.3 1.9-11.2-8.1-7.9L35 30.2z"/><rect x="30" y="58" width="20" height="4" rx="2"/></g></symbol>
+  </defs>
+</svg>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Cairn home"><svg aria-hidden="true"><use href="#i-cairn"/></svg>Cairn<span class="tm">™</span></a>
+    <nav class="nav" aria-label="Primary">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+      <a href="/connect">Connect</a>
+    </nav>
+    <div class="header-cta">
+      <a class="signin" href="/login">Sign in</a>
+      <a class="btn btn-primary btn-sm" href="/signup"><span class="wide-only">Start remembering</span><span class="narrow-only">Sign up</span></a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- HERO -->
+<section class="hero" aria-labelledby="hero-title">
+  <div class="wrap hero-grid">
+    <div>
+      <a class="badge-pill" href="#awards"><b>New</b> Winner of the Golden Cairn of Cairns 2026<sup class="fn">4</sup> →</a>
+      <h1 id="hero-title">
+        <span class="line">Your AI forgets</span>
+        <span class="line">everything.</span>
+        <span class="line grad-text">Cairn doesn’t.</span>
+      </h1>
+      <p class="lede">The cinematic, mission-critical, passkey-armoured, markdown-native, agent-agnostic <strong>cognitive persistence layer</strong> for the post-context-window era. It stores notes. In markdown. And it is going to change your f***ing life.<sup class="fn"><a href="#fn-6" aria-label="Footnote 6">6</a></sup></p>
+      <div class="hero-ctas">
+        <a class="btn btn-primary" href="/signup">Begin remembering — free forever</a>
+        <a class="btn btn-ghost" href="/connect">Connect your agent →</a>
+      </div>
+      <ul class="hero-meta">
+        <li>No credit card. No password. No mercy.</li>
+        <li>Works with claude.ai &amp; Claude Code</li>
+        <li>Leave anytime with a zip of markdown</li>
+      </ul>
+    </div>
+
+    <div class="hero-visual">
+      <svg viewBox="0 0 520 520" role="img" aria-labelledby="cairn-title cairn-desc">
+        <title id="cairn-title">A glowing cairn of five stones</title>
+        <desc id="cairn-desc">Each stone is a markdown note: a title, an observation, a relation, a revision and a receipt, stacked into a monument and orbited by rings of telemetry.</desc>
+        <defs>
+          <radialGradient id="h-glow" cx="50%" cy="55%" r="50%"><stop offset="0" stop-color="#ff4f9a" stop-opacity=".55"/><stop offset=".45" stop-color="#9b6bff" stop-opacity=".18"/><stop offset="1" stop-color="#9b6bff" stop-opacity="0"/></radialGradient>
+          <linearGradient id="h-s1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffb070"/><stop offset="1" stop-color="#e2366f"/></linearGradient>
+          <linearGradient id="h-s2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff7aa8"/><stop offset="1" stop-color="#a53fd6"/></linearGradient>
+          <linearGradient id="h-s3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c39bff"/><stop offset="1" stop-color="#5b33c9"/></linearGradient>
+          <linearGradient id="h-sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient>
+        </defs>
+        <circle cx="260" cy="280" r="250" fill="url(#h-glow)"/>
+        <g class="orbit" fill="none" stroke="#fff" stroke-opacity=".16"><ellipse cx="260" cy="270" rx="230" ry="78" stroke-dasharray="2 8"/><circle cx="490" cy="270" r="4" fill="#ffb36b" stroke="none"/></g>
+        <g class="orbit rev" fill="none" stroke="#fff" stroke-opacity=".12"><ellipse cx="260" cy="270" rx="190" ry="190" stroke-dasharray="1 10"/><circle cx="70" cy="270" r="3" fill="#c9b3ff" stroke="none"/></g>
+        <ellipse cx="260" cy="452" rx="170" ry="20" fill="#000" opacity=".45"/>
+        <g class="stone"><path d="M110 420c0-26 64-44 150-44s150 18 150 44-64 34-150 34-150-8-150-34z" fill="url(#h-s1)"/><path d="M130 412c10-16 66-26 130-26s120 10 130 26c-30-8-80-12-130-12s-100 4-130 12z" fill="url(#h-sheen)"/></g>
+        <g class="stone"><path d="M140 352c0-22 52-38 118-38s124 16 124 38-56 32-124 32-118-10-118-32z" fill="url(#h-s2)"/><path d="M158 345c10-13 52-21 100-21s94 8 104 21c-26-6-62-9-104-9s-76 3-100 9z" fill="url(#h-sheen)"/></g>
+        <g class="stone"><path d="M178 288c0-18 38-31 86-31s88 13 88 31-40 26-88 26-86-8-86-26z" fill="url(#h-s3)"/><path d="M192 282c8-10 36-17 72-17s66 7 74 17c-20-5-46-7-74-7s-52 2-72 7z" fill="url(#h-sheen)"/></g>
+        <g class="stone"><path d="M206 232c0-14 24-24 54-24s56 10 56 24-26 20-56 20-54-6-54-20z" fill="url(#h-s2)"/><path d="M216 228c6-8 22-13 44-13s40 5 46 13c-12-4-28-5-46-5s-32 1-44 5z" fill="url(#h-sheen)"/></g>
+        <g class="stone"><path d="M230 184c0-10 14-17 31-17s31 7 31 17-14 15-31 15-31-5-31-15z" fill="url(#h-s1)"/></g>
+        <circle class="pulse" cx="261" cy="150" r="7" fill="#fff"/>
+        <circle class="pulse" cx="261" cy="150" r="18" fill="#fff" opacity=".18"/>
+        <g font-family="ui-monospace, Menlo, Consolas, monospace" font-size="12.5" fill="#efe9ff">
+          <path d="M296 182h66" stroke="#fff" stroke-opacity=".35"/><text x="368" y="186">rev 3f9a1c2</text>
+          <path d="M316 232h50" stroke="#fff" stroke-opacity=".35"/><text x="372" y="236">[[Burr Grinder]]</text>
+          <path d="M178 288h-46" stroke="#fff" stroke-opacity=".35"/><text x="6" y="292">[preference] 1:16</text>
+          <path d="M140 352h-40" stroke="#fff" stroke-opacity=".35"/><text x="6" y="356">relates_to</text>
+          <text x="186" y="500" fill="#c9bfe6" font-size="11.5" letter-spacing="2">FIG. 1 — A MONUMENT</text>
+        </g>
+      </svg>
+      <div class="term" aria-label="Example: an agent saving a memory to Cairn">
+        <div class="term-bar" aria-hidden="true"><i></i><i></i><i></i><span>agent — cairn</span></div>
+<pre><span class="t-dim">you ›</span> <span class="t-you">Remember that I take my coffee 1:16</span>
+<span class="t-tool">⚙ write_note</span><span class="t-dim">(title:</span> <span class="t-key">"Coffee preferences"</span><span class="t-dim">)</span>
+<span class="t-ok">✓ saved main/coffee-preferences</span>
+<span class="t-dim">  rev 3f9a1c2 · it is now a monument</span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- REAL* USERS: rotating quote pool (static subset here; site.js loads /landing/quotes.json) -->
+<section class="realusers" id="real-users" aria-labelledby="ru-title">
+  <div class="wrap">
+    <h2 id="ru-title" class="ru-title">Real<sup>*</sup> users. Real<sup>*</sup> feelings.</h2>
+    <div class="ru-stage" data-quotes="/landing/quotes.json">
+      <ul class="ru-list">
+      <li class="ru-item"><blockquote><p>I get a lot of ladies, but who has time to keep track of all those feelings and memories and shit? I use Cairn to track my ladies and impress them with how well I pay attention.</p></blockquote><p class="ru-who"><b>Tanner Vexley</b>, Lover, Fighter, Note-taker</p></li>
+      <li class="ru-item"><blockquote><p>It’s kinda like a high school locker room, but with search.</p></blockquote><p class="ru-who"><b>Brayden Kolt</b>, Regional Vibes Manager</p></li>
+      <li class="ru-item"><blockquote><p>My cat holds grudges. Now so do I, in a searchable format.</p></blockquote><p class="ru-who"><b>Linda Purrsworth</b>, Cat liaison</p></li>
+      <li class="ru-item"><blockquote><p>My crypto thesis is 412 notes long and the core insight is “number go up.”</p></blockquote><p class="ru-who"><b>Bryce Hodlman</b>, Chief Vibes Officer, MoonDAO (rug pending)</p></li>
+      <li class="ru-item"><blockquote><p>I keep notes on every meeting. Then I schedule a meeting to review the notes.</p></blockquote><p class="ru-who"><b>Gary Plimpton</b>, Senior Associate Manager of Meetings</p></li>
+      <li class="ru-item"><blockquote><p>My name is Whey-Lon Isolate and I approve this memory system.</p></blockquote><p class="ru-who"><b>Whey-Lon Isolate</b>, Legal name (since 2022)</p></li>
+      </ul>
+      <div class="ru-controls" hidden>
+        <button type="button" class="btn btn-ghost btn-sm" data-ru="next">Another one</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-ru="pause" aria-pressed="false">Pause</button>
+        <span class="ru-count" data-ru="count"></span>
+      </div>
+    </div>
+    <p class="ru-foot">*Fictional. Obviously.</p>
+  </div>
+</section>
+
+<!-- LIVE TICKER -->
+<div class="ticker" aria-label="Live statistics (some of them are jokes)">
+  <ul>
+    <li>Memories forgotten today: <strong>0</strong></li>
+    <li>Coffee ratios retained: <strong>1:16</strong></li>
+    <li>Passwords stored: <strong>0</strong></li>
+    <li>Seconds of perfect recall on this page: <strong data-uptime>many</strong></li>
+    <li>Goldfish outperformed: <strong>all of them</strong><sup class="fn"><a href="#fn-1" aria-label="Footnote 1">1</a></sup></li>
+    <li>Context windows survived: <strong>every one</strong></li>
+    <li aria-hidden="true">Memories forgotten today: <strong>0</strong></li>
+    <li aria-hidden="true">Coffee ratios retained: <strong>1:16</strong></li>
+    <li aria-hidden="true">Passwords stored: <strong>0</strong></li>
+    <li aria-hidden="true">Seconds of perfect recall on this page: <strong data-uptime>many</strong></li>
+    <li aria-hidden="true">Goldfish outperformed: <strong>all of them</strong></li>
+    <li aria-hidden="true">Context windows survived: <strong>every one</strong></li>
+  </ul>
+</div>
+
+<!-- LOGO WALL -->
+<section class="logos" aria-labelledby="logos-title">
+  <div class="wrap">
+    <h2 class="logos-label" id="logos-title">Trusted by visionaries at companies that may or may not exist</h2>
+  </div>
+  <div class="marquee">
+    <div class="marquee-track">
+      <ul>
+        <li class="wm wm-a"><svg viewBox="0 0 26 26" aria-hidden="true"><path d="M13 2l11 20H2z" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="13" cy="15" r="3" fill="currentColor"/></svg>Gorblax Dynamics</li>
+        <li class="wm wm-b"><svg viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="13" cy="13" r="3.5" fill="currentColor"/></svg>Quantum Bagel</li>
+        <li class="wm wm-c"><svg viewBox="0 0 26 26" aria-hidden="true"><path d="M3 18l5-10 5 10 5-10 5 10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/></svg>hyperfjord.</li>
+        <li class="wm wm-d"><svg viewBox="0 0 26 26" aria-hidden="true"><rect x="3" y="3" width="9" height="9" fill="currentColor"/><rect x="14" y="14" width="9" height="9" fill="currentColor"/><rect x="14" y="3" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2"/></svg>Synergon</li>
+        <li class="wm wm-e"><svg viewBox="0 0 26 26" aria-hidden="true"><path d="M4 20c4-12 14-12 18 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="13" cy="7" r="3" fill="currentColor"/></svg>Moonbeam Mutual</li>
+        <li class="wm wm-f">Clamshell &amp; Clamshell</li>
+        <li class="wm wm-a"><svg viewBox="0 0 26 26" aria-hidden="true"><path d="M13 3v20M3 13h20M6 6l14 14M20 6L6 20" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>Llamatron Labs</li>
+        <li class="wm wm-b">Wobbleton Ventures</li>
+        <li class="wm wm-c"><svg viewBox="0 0 26 26" aria-hidden="true"><path d="M3 13h6l3-8 4 16 3-8h4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg>vortexify.io.ai</li>
+        <li class="wm wm-d">Big Rock Energy</li>
+      </ul>
+      <ul aria-hidden="true">
+        <li class="wm wm-a"><svg viewBox="0 0 26 26"><path d="M13 2l11 20H2z" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="13" cy="15" r="3" fill="currentColor"/></svg>Gorblax Dynamics</li>
+        <li class="wm wm-b"><svg viewBox="0 0 26 26"><circle cx="13" cy="13" r="10" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="13" cy="13" r="3.5" fill="currentColor"/></svg>Quantum Bagel</li>
+        <li class="wm wm-c"><svg viewBox="0 0 26 26"><path d="M3 18l5-10 5 10 5-10 5 10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/></svg>hyperfjord.</li>
+        <li class="wm wm-d"><svg viewBox="0 0 26 26"><rect x="3" y="3" width="9" height="9" fill="currentColor"/><rect x="14" y="14" width="9" height="9" fill="currentColor"/><rect x="14" y="3" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2"/></svg>Synergon</li>
+        <li class="wm wm-e"><svg viewBox="0 0 26 26"><path d="M4 20c4-12 14-12 18 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="13" cy="7" r="3" fill="currentColor"/></svg>Moonbeam Mutual</li>
+        <li class="wm wm-f">Clamshell &amp; Clamshell</li>
+        <li class="wm wm-a"><svg viewBox="0 0 26 26"><path d="M13 3v20M3 13h20M6 6l14 14M20 6L6 20" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>Llamatron Labs</li>
+        <li class="wm wm-b">Wobbleton Ventures</li>
+        <li class="wm wm-c"><svg viewBox="0 0 26 26"><path d="M3 13h6l3-8 4 16 3-8h4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg>vortexify.io.ai</li>
+        <li class="wm wm-d">Big Rock Energy</li>
+      </ul>
+    </div>
+  </div>
+  <div class="wrap">
+    <p class="logos-label" style="margin:56px 0 0">As breathlessly covered in</p>
+    <ul class="press">
+      <li class="p1">The Hyperbolic Times</li>
+      <li class="p2">Gravitas Quarterly</li>
+      <li class="p3">Thunderclap Review</li>
+      <li class="p4">venture_squid</li>
+      <li class="p5">THE UNBLINKING EYE</li>
+    </ul>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="section" id="features" aria-labelledby="features-title">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="eyebrow">Capabilities</p>
+      <h2 id="features-title">Engineered for <span class="grad-text">total recall</span>. Priced for total nothing.</h2>
+      <p>Every feature below is real. Only the adjectives have been enhanced for theatrical release.</p>
+    </div>
+
+    <div class="bento">
+      <article class="card w4">
+        <p class="kicker">Format</p>
+        <h3>Plain markdown. Infinite power.</h3>
+        <p>Every memory is a markdown file with observations and <code>[[links]]</code>. Not a vector. Not a vibe. Not a “proprietary cognitive embedding”. A file you can read, edit and take with you. It will outlive three startups and at least one civilisation.</p>
+        <div class="snippet" aria-label="Example note in Cairn's markdown format">
+<pre><span class="c-h"># Coffee preferences</span>
+
+<span class="c-h">## Observations</span>
+- <span class="c-cat">[preference]</span> Takes coffee at 1:16 <span class="c-dim">#ritual</span>
+- <span class="c-cat">[method]</span> Pour over, every morning, no exceptions
+
+<span class="c-h">## Relations</span>
+- requires <span class="c-link">[[Burr Grinder]]</span></pre>
+        </div>
+      </article>
+
+      <article class="card">
+        <p class="kicker">Recall</p>
+        <p class="stat grad-text">10,000×</p>
+        <p class="stat-label">more recall than a goldfish<sup class="fn"><a href="#fn-1" aria-label="Footnote 1">1</a></sup></p>
+        <p>Hybrid search runs full-text BM25 <em>and</em> 1024-dimensional vector search, then fuses them with Reciprocal Rank Fusion: an algorithm with the word “fusion” in its name.</p>
+      </article>
+
+      <article class="card">
+        <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/></svg></div>
+        <h3>Zero passwords. Zero mercy.</h3>
+        <p class="stat">0</p>
+        <p class="stat-label">passwords stored. We counted twice.</p>
+        <p>Passkeys only. Your face, your finger, your security key. Ten single-use recovery codes at signup, for when the fingers go missing.</p>
+      </article>
+
+      <article class="card">
+        <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 7V3M15 7V3M7 7h10v5a5 5 0 01-10 0zM12 17v4"/></svg></div>
+        <h3>Plugs directly into your agent’s brain stem.</h3>
+        <p>A remote MCP server behind OAuth 2.1 with PKCE (an acronym inside an acronym). claude.ai and Claude Code connect in about ninety seconds. Fifteen-odd tools with plain names like <code>search_notes</code>, all business.</p>
+      </article>
+
+      <article class="card">
+        <p class="kicker">Receipts</p>
+        <h3>Receipts. Every. Single. Time.</h3>
+        <p>Every write returns a receipt with the note, revision and time. No receipt, it didn’t happen. Like brunch.</p>
+        <div class="snippet"><pre><span class="c-ok">saved</span> main/coffee-preferences
+rev 3f9a1c2 at 09:14</pre></div>
+      </article>
+
+      <article class="card w3">
+        <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="10" cy="18" r="2.5"/><path d="M8.3 7l7.4.8M7 8.2l2.2 7.4M16.4 10l-4.6 6.2"/></svg></div>
+        <h3>A knowledge graph, without the graph database.</h3>
+        <p>Your <code>[[links]]</code> <em>are</em> the graph. Relations like <code>relates_to</code> and <code>requires</code> are typed, forward references wait patiently for their notes to exist, and the viewer shows backlinks. We did not build a graph database, and frankly that is the boldest thing we have ever done.</p>
+      </article>
+
+      <article class="card w3">
+        <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18M8 4v5"/></svg></div>
+        <h3>Isolation so hard it’s basically a monastery.</h3>
+        <p class="stat">1</p>
+        <p class="stat-label">private SQLite database per vault</p>
+        <p>Each vault lives in its own Durable Object on Cloudflare’s edge. Your memories do not make eye contact with anyone else’s. Every write records who made it, which agent, and keeps the prior revision.</p>
+      </article>
+
+      <article class="card">
+        <p class="kicker">Freedom</p>
+        <p class="stat grad-text">1 click</p>
+        <p class="stat-label">to leave with everything</p>
+        <p>Download a zip of every note as markdown, links intact. Opens in Obsidian or Basic Memory. We’ll cry, but quietly.</p>
+      </article>
+
+      <article class="card">
+        <p class="kicker">Viewer</p>
+        <h3>Gaze upon your own mind.</h3>
+        <p>A web viewer with rendered notes, live wiki links, backlinks, search, and a feed of what your agents wrote recently. Agent-written text is rendered safely, because trust is earned.</p>
+      </article>
+
+      <article class="card">
+        <p class="kicker">Deployment</p>
+        <p class="stat grad-text">~$5</p>
+        <p class="stat-label">per month to self-host a heavy user<sup class="fn"><a href="#fn-5" aria-label="Footnote 5">5</a></sup></p>
+        <p>One Cloudflare Worker. Runs on the edge. The edge of what? Of everything.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="section" id="how" aria-labelledby="how-title" style="padding-top:0">
+  <div class="wrap">
+    <div class="section-head center">
+      <p class="eyebrow">The Cairn Pipeline™</p>
+      <h2 id="how-title">Three phases. One destiny.</h2>
+      <p>Our patented<sup class="fn"><a href="#fn-7" aria-label="Footnote 7">7</a></sup> three-phase cognitive persistence architecture, explained with the gravity it deserves (and, underneath, what actually happens).</p>
+    </div>
+    <ol class="pipeline" style="list-style:none;padding:0;margin:0">
+      <li class="phase">
+        <span class="num">Phase I</span>
+        <h3>Ingestion</h3>
+        <p>A thought is born. Your agent, sensing its importance, commits it to eternity.</p>
+        <div class="chips"><span class="chip">write_note</span><span class="chip">edit_note</span></div>
+        <p class="truth"><b>What happens:</b> your agent writes a markdown note with observations and relations over MCP, and gets a receipt.</p>
+      </li>
+      <li class="arrow" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 20h26M24 12l8 8-8 8"/></svg></li>
+      <li class="phase">
+        <span class="num">Phase II</span>
+        <h3>Crystallisation</h3>
+        <p>The note is shattered into meaning and reforged as an index of terrifying precision.</p>
+        <div class="chips"><span class="chip">FTS5</span><span class="chip">vectors</span><span class="chip">relations</span></div>
+        <p class="truth"><b>What happens:</b> the markdown is parsed into a full-text index, embeddings and relation rows. They’re rebuilt from the text, which stays the source of truth.</p>
+      </li>
+      <li class="arrow" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 20h26M24 12l8 8-8 8"/></svg></li>
+      <li class="phase">
+        <span class="num">Phase III</span>
+        <h3>Recall</h3>
+        <p>Weeks later, in a new chat, your agent remembers. You feel seen. Possibly too seen.</p>
+        <div class="chips"><span class="chip">search_notes</span><span class="chip">build_context</span><span class="chip">read_note</span></div>
+        <p class="truth"><b>What happens:</b> the agent searches, follows links a few hops out, and reads what it needs.</p>
+      </li>
+    </ol>
+    <p class="pipeline-note">Total phases: 3. Total graph databases: 0. Total LLM calls on the server: also 0. The server is cheap and dumb; your agent is the clever one.</p>
+  </div>
+</section>
+
+<!-- TESTIMONIALS -->
+<section class="section" id="testimonials" aria-labelledby="t-title" style="background:var(--bg-2)">
+  <div class="wrap">
+    <div class="section-head center">
+      <p class="eyebrow">Testimonials</p>
+      <h2 id="t-title">Beloved by people who are <span class="grad-text">definitely real</span>.</h2>
+      <p>Every name, face and quote below is invented. The feelings are not.</p>
+    </div>
+    <div class="quotes">
+      <figure class="quote big">
+        <div class="stars" aria-label="Five stars">★★★★★</div>
+        <blockquote><p>I’ve outrun eleven exploding helicopters. Only one thing ever scared me: forgetting where I parked the twelfth. Cairn remembered. Cairn always remembers.</p></blockquote>
+        <figcaption><span class="avatar" style="background:linear-gradient(135deg,#ff8a3d,#d1196f)" aria-hidden="true">BT</span><span class="who"><b>Brick Thunderstone</b><span>Action hero, star of <i>Detonation Protocol 4: Final Detonation</i></span></span></figcaption>
+      </figure>
+      <figure class="quote">
+        <div class="stars" aria-label="Five stars">★★★★★</div>
+        <blockquote><p>I told my agent my grandmother’s risotto recipe once. Once! Now it brings it up in every conversation. Magnifique. Also, a little much.</p></blockquote>
+        <figcaption><span class="avatar" style="background:linear-gradient(135deg,#ffb36b,#e0560f)" aria-hidden="true">GS</span><span class="who"><b>Chef Gaspard Saucier-Blanc</b><span>Three-time champion, <i>Knife Fight Island</i></span></span></figcaption>
+      </figure>
+      <figure class="quote">
+        <div class="stars" aria-label="Five stars">★★★★★</div>
+        <blockquote><p>In orbit we had a checklist for everything. Cairn is that checklist, but with backlinks. I wept. In zero gravity your tears just sort of hang there. It’s a whole thing.</p></blockquote>
+        <figcaption><span class="avatar" style="background:linear-gradient(135deg,#7fd3ff,#6a2bd4)" aria-hidden="true">DS</span><span class="who"><b>Col. Dottie Starbuckle (ret.)</b><span>Astronaut, 412 days in orbit, 0 days without a note</span></span></figcaption>
+      </figure>
+      <figure class="quote">
+        <div class="stars" aria-label="Five stars">★★★★★</div>
+        <blockquote><p>If a memory is stored in markdown and no agent reads it, does it persist? Yes. That is literally what “persist” means. Cairn opened my third eye and then gave it a permalink.</p></blockquote>
+        <figcaption><span class="avatar" style="background:linear-gradient(135deg,#c39bff,#3b1f8f)" aria-hidden="true">TV</span><span class="who"><b>Thaddeus Vortex</b><span>Philosophy influencer, 4.2M followers, 0 conclusions</span></span></figcaption>
+      </figure>
+      <figure class="quote big">
+        <div class="stars" aria-label="Five stars">★★★★★</div>
+        <blockquote><p>I REMEMBER EVERY SLICE. WHITE. RYE. THE SOURDOUGH OF ’24. CAIRN GAVE MY SUFFERING A PERMALINK. 10/10. WOULD POP AGAIN.</p></blockquote>
+        <figcaption><span class="avatar" aria-hidden="true"><svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="24" fill="#2a2438"/><rect x="10" y="17" width="28" height="20" rx="6" fill="#c9c3d6"/><rect x="15" y="12" width="7" height="8" rx="2" fill="#e8b46a"/><rect x="26" y="12" width="7" height="8" rx="2" fill="#e8b46a"/><circle cx="18" cy="27" r="2" fill="#ff4f9a"/><circle cx="30" cy="27" r="2" fill="#ff4f9a"/><rect x="36" y="23" width="4" height="7" rx="1.5" fill="#8f88a8"/></svg></span><span class="who"><b>TOASTY-9000</b><span>Sentient toaster, kitchen counter, achieved consciousness 2025</span></span></figcaption>
+      </figure>
+      <figure class="quote">
+        <div class="stars" aria-label="Four stars">★★★★☆</div>
+        <blockquote><p>I don’t know what any of this is, but the young man said it would change my life and so far it has not. Lovely colours, though. One star off for the swearing.</p></blockquote>
+        <figcaption><span class="avatar" style="background:linear-gradient(135deg,#ff9fc4,#b3166c)" aria-hidden="true">NB</span><span class="who"><b>Nana Bevlyn Okafor-Smythe</b><span>94, competitive bingo, undefeated since 1979</span></span></figcaption>
+      </figure>
+      <figure class="quote">
+        <div class="stars" aria-label="Five stars">★★★★★</div>
+        <blockquote><p>We used to keep the company’s institutional knowledge in Gary. Gary retired. Now we keep it in Cairn, and Cairn has an export button. Gary did not have an export button.</p></blockquote>
+        <figcaption><span class="avatar" style="background:linear-gradient(135deg,#6ff0b6,#0f7a6a)" aria-hidden="true">PF</span><span class="who"><b>Prudence Flagstaff</b><span>Chief Synergy Officer, Gorblax Dynamics</span></span></figcaption>
+      </figure>
+      <figure class="quote">
+        <div class="stars" aria-label="Five stars">★★★★★</div>
+        <blockquote><p>On the mountain, you stack a stone to say “someone was here, and the path goes this way.” I didn’t expect a database to make me feel that. I also didn’t expect a database.</p></blockquote>
+        <figcaption><span class="avatar" style="background:linear-gradient(135deg,#ffd27a,#7a4a00)" aria-hidden="true">SK</span><span class="who"><b>Kip Vandermolen</b><span>Mountain mystic, amateur YAML enjoyer</span></span></figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- AWARDS -->
+<section class="section" id="awards" aria-labelledby="awards-title">
+  <div class="wrap">
+    <div class="section-head center">
+      <p class="eyebrow">Recognition</p>
+      <h2 id="awards-title">Decorated beyond reason.</h2>
+    </div>
+    <ul class="awards">
+      <li class="award"><svg aria-hidden="true" style="color:#d4a017"><use href="#i-laurel"/></svg><b>Golden Cairn of Cairns</b><span>2026 · self-awarded<sup class="fn"><a href="#fn-4" aria-label="Footnote 4">4</a></sup></span></li>
+      <li class="award"><svg aria-hidden="true" style="color:var(--accent)"><use href="#i-laurel"/></svg><b>Most Markdown</b><span>Edge Computing Gala, 2026</span></li>
+      <li class="award"><svg aria-hidden="true" style="color:var(--accent-2)"><use href="#i-laurel"/></svg><b>Product of the Day</b><span>Tuesday</span></li>
+      <li class="award"><svg aria-hidden="true" style="color:#9aa4b2"><use href="#i-laurel"/></svg><b>Best Use of “Synergy” in a Footer</b><span>Honourable mention</span></li>
+      <li class="award"><svg aria-hidden="true" style="color:var(--accent-3)"><use href="#i-laurel"/></svg><b>Grand Prix of Recollection</b><span>Shortlisted (category does not exist)</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section class="section pricing" id="pricing" aria-labelledby="pricing-title" style="padding-top:0">
+  <div class="wrap">
+    <div class="section-head center">
+      <p class="eyebrow">Pricing</p>
+      <h2 id="pricing-title">Plans for every <span class="grad-text">scale of ambition</span>.</h2>
+      <p>Choose the tier that matches your destiny. They all cost the same.</p>
+    </div>
+    <div class="tiers">
+      <article class="tier">
+        <h3>Pebble</h3>
+        <p class="for">For individuals who remember things occasionally.</p>
+        <p class="price"><b>$0</b><span>/ month</span></p>
+        <p class="price-note">Free, forever, or until the heat death of the universe.</p>
+        <ul>
+          <li>Passkey sign-in</li>
+          <li>Hybrid search</li>
+          <li>All eight MCP tools</li>
+          <li>One-click markdown export</li>
+        </ul>
+        <a class="btn btn-ghost" href="/signup">Start with Pebble</a>
+      </article>
+      <article class="tier pop">
+        <span class="flag">Most popular</span>
+        <h3>Boulder Pro</h3>
+        <p class="for">For professionals whose memories have memories.</p>
+        <p class="price"><b>$0</b><span>/ month</span></p>
+        <p class="price-note">Billed annually at $0. Save 0% vs. monthly!</p>
+        <ul>
+          <li>Everything in Pebble</li>
+          <li>50 MB of pure, uncut markdown<sup class="fn"><a href="#fn-3" aria-label="Footnote 3">3</a></sup></li>
+          <li>Up to 20 vaults</li>
+          <li>A receipt for every write</li>
+        </ul>
+        <a class="btn btn-primary" href="/signup">Go Boulder</a>
+      </article>
+      <article class="tier">
+        <h3>Monolith Enterprise</h3>
+        <p class="for">For organisations with a Chief Remembering Officer.</p>
+        <p class="price"><b>$0</b><span>/ seat</span></p>
+        <p class="price-note">Contact sales. There is no sales. The void will answer, and the void is also free.</p>
+        <ul>
+          <li>Everything in Boulder Pro</li>
+          <li>Per-vault isolated databases</li>
+          <li>Revision history on every write</li>
+          <li>Self-host it on your own Cloudflare</li>
+        </ul>
+        <a class="btn btn-ghost" href="/signup">Talk to the void</a>
+      </article>
+      <article class="tier galactic">
+        <h3>Event Horizon</h3>
+        <p class="for">For civilisations, hive minds and at least one toaster.</p>
+        <p class="price"><b>$0</b><span>/ light-year</span></p>
+        <p class="price-note">Pricing adjusted for relativistic time dilation.</p>
+        <ul>
+          <li>Everything in Monolith</li>
+          <li>Memories that outlast stars<sup class="fn"><a href="#fn-2" aria-label="Footnote 2">2</a></sup></li>
+          <li>A heartfelt nod</li>
+          <li>Same software as Pebble, honestly</li>
+        </ul>
+        <a class="btn btn-ghost" href="/signup">Cross the horizon</a>
+      </article>
+    </div>
+    <p class="pricing-foot">All four tiers are the same tier. Cairn is a personal project running on one person’s Cloudflare account, so it costs you nothing.<sup class="fn"><a href="#fn-5" aria-label="Footnote 5">5</a></sup></p>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="section" id="faq" aria-labelledby="faq-title" style="padding-top:0">
+  <div class="wrap">
+    <div class="section-head center">
+      <p class="eyebrow">FAQ</p>
+      <h2 id="faq-title">Frequently anticipated questions.</h2>
+      <p>The questions are absurd. The answers are mostly true.</p>
+    </div>
+    <div class="faq">
+      <details>
+        <summary>Will Cairn change my life?</summary>
+        <div><p>Statistically, yes. Practically, it gives your AI assistant a place to keep markdown notes between conversations, and a way to find them again. Whether that changes your life depends on how much you were repeating yourself before.</p></div>
+      </details>
+      <details>
+        <summary>What actually is it?</summary>
+        <div><p>A memory server for AI assistants, running as a Cloudflare Worker. Your agent connects over MCP (with OAuth), and gets tools to write, read, edit, search, list and delete notes, and to follow the links between them. Notes use the same markdown format as Basic Memory: observations like <code>- [preference] …</code> and relations like <code>- relates_to [[Other note]]</code>. You sign in with a passkey, and there’s a web viewer for browsing what your agents have saved.</p></div>
+      </details>
+      <details>
+        <summary>Where do my memories go when I close the tab? Do they get cold?</summary>
+        <div><p>They stay warm in a SQLite database inside a Cloudflare Durable Object, one per vault. Search indexes (full-text and vectors) are built from your notes and can always be rebuilt from them. The markdown is the source of truth; nothing exists only in an index.</p></div>
+      </details>
+      <details>
+        <summary>Is my data used to train an AI that will one day replace me?</summary>
+        <div><p>Cairn doesn’t train anything, and there’s no language model on the server. To make semantic search work, note text is turned into embeddings with an open embedding model on Cloudflare Workers AI. Your clever agent does the thinking; the server just stores and finds.</p></div>
+      </details>
+      <details>
+        <summary>What if I forget my passkey? Isn’t that a bit ironic?</summary>
+        <div><p>Deeply. At signup you get ten single-use recovery codes: save them somewhere that isn’t Cairn. Adding a second passkey (say, your phone and your laptop) is the best insurance. There is no email reset, because there is no email.</p></div>
+      </details>
+      <details>
+        <summary>Can I leave? Will you be sad?</summary>
+        <div><p>Yes, and only a little. Settings → Download everything gives you a zip of every note as markdown, with <code>[[links]]</code> intact, ready for Obsidian or Basic Memory.</p></div>
+      </details>
+      <details>
+        <summary>Which agents work with it?</summary>
+        <div><p>Anything that speaks remote MCP with OAuth. claude.ai and Claude Code are the tested path; the <a href="/connect">connect guide</a> walks through both in about two minutes.</p></div>
+      </details>
+      <details>
+        <summary>What happens if there are snakes on my plane?</summary>
+        <div><p>Cairn will remember which plane. Beyond that, frankly, you’re on your own.</p></div>
+      </details>
+      <details>
+        <summary>Is this a parody?</summary>
+        <div><p>The marketing is. The celebrities, companies, publications and awards are invented. The software is real, it works, and it’s built to be self-hosted on Cloudflare Workers.</p></div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- FINALE -->
+<section class="finale" aria-labelledby="finale-title">
+  <div class="wrap">
+    <p class="trailer"><span>In a world where context windows close…</span><span>where every chat starts from nothing…</span><span>one memory system dared to write it down.</span></p>
+    <h2 id="finale-title">This fall, <span class="grad-text">remember everything</span>.</h2>
+    <p>Sign up with a passkey in about ten seconds. Connect your agent in about ninety. Tell it something once.</p>
+    <div class="hero-ctas">
+      <a class="btn btn-primary" href="/signup">Begin remembering</a>
+      <a class="btn btn-ghost" href="/connect">Read the quickstart</a>
+    </div>
+    <p class="rating" aria-label="Rated M for Memory: contains intense recall, mild markdown and one asterisked swear"><b>M</b>Rated M for Memory. Contains intense recall, mild markdown and one asterisked swear.</p>
+  </div>
+</section>
+
+<!-- FINE PRINT -->
+<section class="fineprint" aria-labelledby="fp-title">
+  <div class="wrap">
+    <h2 id="fp-title">The fine print</h2>
+    <ol>
+      <li id="fn-1">Goldfish comparison based on the popular belief that goldfish remember for three seconds. This turns out to be a myth; goldfish remember for months. We apologise to goldfish.</li>
+      <li id="fn-2">Measured against an agent with no memory at all, which remembers nothing. Anything is infinitely better than nothing. Stars not included.</li>
+      <li id="fn-3">Each account gets 50 MB in total, 1 MB per note and up to 20 vaults. That is a lot of coffee ratios.</li>
+      <li id="fn-4">Every award on this page is invented and was presented by us, to us, in a ceremony we also invented.</li>
+      <li id="fn-5">This instance is free because it is a personal project. Running your own Cairn uses a single Cloudflare Worker: the Free plan is enough to try it, and the $5/month Workers Paid plan comfortably covers a heavy user.</li>
+      <li id="fn-6">Life changes not guaranteed. Cairn stores markdown notes for AI agents. Any resulting transformation is between you and your agent.</li>
+      <li id="fn-7">Not patented. Not patentable. It’s write, index, search.</li>
+    </ol>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <a class="brand" href="/" aria-label="Cairn home"><svg aria-hidden="true"><use href="#i-cairn"/></svg>Cairn</a>
+        <p style="margin-top:12px">Memory for your AI, in markdown you own. Synergising your recall since 2026.</p>
+      </div>
+      <div>
+        <h2>Product</h2>
+        <ul><li><a href="#features">Features</a></li><li><a href="#pricing">Pricing</a></li><li><a href="#faq">FAQ</a></li></ul>
+      </div>
+      <div>
+        <h2>Get started</h2>
+        <ul><li><a href="/signup">Sign up</a></li><li><a href="/login">Sign in</a></li><li><a href="/connect">Connect your agent</a></li></ul>
+      </div>
+      <div>
+        <h2>Legal-ish</h2>
+        <ul><li><a href="#fp-title">Fine print</a></li><li><a href="#fn-4">Our awards, explained</a></li></ul>
+      </div>
+    </div>
+    <p class="honest"><b>Honest bit:</b> Cairn is a personal project and a parody of AI memory marketing. The celebrities, testimonials, companies, publications and awards are invented. The software is real.</p>
+    <p class="copyright">© 2026 Cairn. Your notes are yours. The jokes are free to a good home.</p>
+  </div>
+</footer>
+</body>
+</html>

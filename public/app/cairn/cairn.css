@@ -1,0 +1,125 @@
+/* Cairn additions on top of owg-css (which does almost everything classless). */
+.muted {
+  color: var(--owg-muted);
+}
+.small {
+  font-size: 0.875em;
+}
+.error {
+  color: var(--owg-danger);
+}
+a.wikilink.unresolved {
+  color: var(--owg-amber);
+  text-decoration-style: dashed;
+}
+form.inline {
+  display: inline;
+}
+header form.search {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin: 0;
+}
+header form.search input {
+  min-width: 10rem;
+}
+.note-body {
+  overflow-wrap: anywhere;
+}
+.note-body img {
+  max-width: 100%;
+}
+pre.codes {
+  columns: 2;
+}
+pre.cmd {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.crumbs {
+  font-size: 0.9em;
+}
+figure.chart {
+  margin: 1rem 0;
+}
+figure.chart svg {
+  width: 100%;
+  height: 180px;
+  display: block;
+}
+figure.chart .bar {
+  fill: var(--owg-accent);
+}
+figure.chart .axis {
+  stroke: var(--owg-border);
+}
+figure.chart .tick {
+  fill: var(--owg-muted);
+  font-size: 10px;
+}
+figure.chart figcaption {
+  font-size: 0.875em;
+  color: var(--owg-muted);
+}
+.stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  margin: 0.75rem 0;
+}
+.stat-row .stat strong {
+  display: block;
+  font-size: 1.4em;
+}
+nav.tabs a[aria-current="page"] {
+  font-weight: 700;
+  text-decoration: none;
+}
+.span-2 {
+  grid-column: span 2;
+}
+table.diff {
+  font-size: 0.85em;
+  width: 100%;
+  table-layout: fixed;
+}
+table.diff td {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+  padding: 0 0.3rem;
+  border: 0;
+}
+table.diff td.ln {
+  width: 3rem;
+  color: var(--owg-muted);
+  text-align: right;
+}
+table.diff td.del,
+pre.diff-unified .del {
+  background: var(--owg-red-soft);
+}
+table.diff td.add,
+pre.diff-unified .add {
+  background: var(--owg-green-soft);
+}
+table.diff tr.gap td,
+pre.diff-unified .gap {
+  color: var(--owg-muted);
+  text-align: center;
+}
+pre.diff-unified {
+  display: none;
+  white-space: pre-wrap;
+}
+@media (max-width: 899px) {
+  .diff-split {
+    display: none;
+  }
+  pre.diff-unified {
+    display: block;
+  }
+  .span-2 {
+    grid-column: auto;
+  }
+}

@@ -1,0 +1,10 @@
+From: Taro Yamada <{{FROM}}>
+To: {{TO}}
+Subject: {{SUBJECT_PREFIX}}=?ISO-2022-JP?B?GyRCMnE1RCROTT1EahsoQg==?=
+Date: Thu, 05 Nov 2026 10:00:00 +0900
+Message-ID: <sjis-{{NONCE}}@example.jp>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=Shift_JIS
+Content-Transfer-Encoding: base64
+
+ie+LY4LNltiXapP6gsyM34zjjk+OnoLFgreBQg==

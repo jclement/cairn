@@ -1,0 +1,12 @@
+{
+  "name": "cairn",
+  "description": "Cairn: long-term memory for AI assistants (MCP server + skills).",
+  "owner": { "name": "Jeff Clement", "url": "https://cairn.onewheelgeek.net" },
+  "plugins": [
+    {
+      "name": "cairn",
+      "description": "Connects Claude Code to a Cairn memory server and teaches it to use it well: writing notes, resuming work, capturing decisions, tending the memory.",
+      "source": "./plugin"
+    }
+  ]
+}

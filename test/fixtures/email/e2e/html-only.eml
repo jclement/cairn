@@ -1,0 +1,20 @@
+From: Product Updates <{{FROM}}>
+To: {{TO}}
+Subject: {{SUBJECT_PREFIX}}Release 4.2 is out
+Date: Wed, 04 Nov 2026 08:00:00 -0500
+Message-ID: <newsletter-{{NONCE}}@mailer.example.com>
+List-Unsubscribe: <https://example.com/u/123>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PCFET0NUWVBFIGh0bWw+PGh0bWw+PGhlYWQ+PG1ldGEgY2hhcnNldD0idXRmLTgiPjxzdHlsZT4u
+eHtjb2xvcjpyZWR9IFNUWUxFLU1BUktFUjwvc3R5bGU+Cjx0aXRsZT5OZXdzbGV0dGVyPC90aXRs
+ZT48L2hlYWQ+PGJvZHk+Cjx0YWJsZSByb2xlPSJwcmVzZW50YXRpb24iPjx0cj48dGQ+PGgxPlJl
+bGVhc2UgNC4yIGlzIG91dDwvaDE+CjxwPlRocmVlIHRoaW5ncyBjaGFuZ2VkOjwvcD48b2w+PGxp
+PjxzdHJvbmc+RmFzdGVyIHN5bmM8L3N0cm9uZz48L2xpPjxsaT5EYXJrIG1vZGU8L2xpPjxsaT5C
+dWcgZml4ZXM8L2xpPjwvb2w+CjxwPlJlYWQgdGhlIDxhIGhyZWY9Imh0dHBzOi8vZXhhbXBsZS5j
+b20vY2hhbmdlbG9nP3V0bV9zb3VyY2U9bWFpbCI+ZnVsbCBjaGFuZ2Vsb2c8L2E+LjwvcD4KPHA+
+PGltZyBzcmM9Imh0dHBzOi8vdHJhY2tlci5leGFtcGxlLmNvbS9vcGVuLmdpZiIgd2lkdGg9IjEi
+IGhlaWdodD0iMSIgYWx0PSIiPjwvcD4KPHNjcmlwdD5kb2N1bWVudC53cml0ZSgiU0NSSVBULU1B
+UktFUiIpPC9zY3JpcHQ+CjwvdGQ+PC90cj48L3RhYmxlPjwvYm9keT48L2h0bWw+

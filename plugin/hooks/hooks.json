@@ -1,0 +1,16 @@
+{
+  "description": "Reminds the assistant to load Cairn core memory at the start of a session. Prints one line; makes no network call.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'Cairn memory is connected. Before working, call core_memory to load core memory; to resume a topic follow the cairn-continue skill. A save without a receipt did not happen.'",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

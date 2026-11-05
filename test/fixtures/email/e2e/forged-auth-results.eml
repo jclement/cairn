@@ -1,0 +1,10 @@
+Authentication-Results: mx.cloudflare.net; dkim=pass header.d=example.org; dmarc=pass header.from=example.org
+From: Trusted Person <{{FROM}}>
+To: {{TO}}
+Subject: Please pay this invoice
+Date: Thu, 05 Nov 2026 13:00:00 +0000
+Message-ID: <forged-{{NONCE}}@attacker.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+FORGED-MARKER

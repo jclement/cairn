@@ -1,0 +1,174 @@
+{
+  "about": "Search cases over corpus.json. relevant: notes that answer the query (empty = nothing relevant). split: tune cases are used while iterating; held-out cases only to confirm.",
+  "cases": [
+    {
+      "id": "s01",
+      "split": "tune",
+      "query": "when is the billing portal beta",
+      "relevant": ["meetings/2026-04-02-larkspur-sync", "projects/billing-portal-redesign"]
+    },
+    {
+      "id": "s02",
+      "split": "held",
+      "query": "who is our main contact at the water utility",
+      "relevant": ["orgs/larkspur-water", "people/dana-roe"]
+    },
+    {
+      "id": "s03",
+      "split": "tune",
+      "query": "how hot should the oven be for bread",
+      "relevant": ["recipes/sourdough"]
+    },
+    {
+      "id": "s04",
+      "split": "held",
+      "query": "what size furnace filter do I buy",
+      "relevant": ["home/furnace"]
+    },
+    {
+      "id": "s05",
+      "split": "tune",
+      "query": "why did we pick a relational database",
+      "relevant": ["decisions/use-postgres-for-portal"]
+    },
+    {
+      "id": "s06",
+      "split": "held",
+      "query": "how do I roll back a bad release",
+      "relevant": ["code/deploy-runbook"]
+    },
+    {
+      "id": "s07",
+      "split": "tune",
+      "query": "which kid has a nut allergy",
+      "relevant": ["family/allergies"]
+    },
+    {
+      "id": "s08",
+      "split": "held",
+      "query": "how much does a heat pump cost to install",
+      "relevant": ["research/heat-pumps"]
+    },
+    {
+      "id": "s09",
+      "split": "tune",
+      "query": "when do I need to put the winter tires on",
+      "relevant": ["home/car"]
+    },
+    {
+      "id": "s10",
+      "split": "held",
+      "query": "who knows Postgres performance well",
+      "relevant": ["people/priya-shah"]
+    },
+    {
+      "id": "s11",
+      "split": "tune",
+      "query": "what did my mentor say about decisions in meetings",
+      "relevant": ["people/maria-lopez"]
+    },
+    {
+      "id": "s12",
+      "split": "held",
+      "query": "when is spring break",
+      "relevant": ["family/school-calendar"]
+    },
+    {
+      "id": "s13",
+      "split": "tune",
+      "query": "why does the checkout test fail on CI",
+      "relevant": ["code/flaky-tests"]
+    },
+    {
+      "id": "s14",
+      "split": "held",
+      "query": "how often should I replace running shoes",
+      "relevant": ["health/running-plan"]
+    },
+    {
+      "id": "s15",
+      "split": "tune",
+      "query": "what is the RRSP contribution deadline",
+      "relevant": ["money/taxes"]
+    },
+    {
+      "id": "s16",
+      "split": "held",
+      "query": "when should tomatoes go in the ground",
+      "relevant": ["garden/vegetable-plan"]
+    },
+    {
+      "id": "s17",
+      "split": "tune",
+      "query": "what is my dentist's phone number",
+      "relevant": []
+    },
+    {
+      "id": "s18",
+      "split": "held",
+      "query": "what is the wifi password for the cottage",
+      "relevant": []
+    },
+    {
+      "id": "s19",
+      "split": "tune",
+      "query": "Larkspur water contract renewal price increase",
+      "relevant": [],
+      "partial": ["orgs/larkspur-water"]
+    },
+    {
+      "id": "s20",
+      "split": "held",
+      "query": "recommended dosage for the kids' allergy medicine",
+      "relevant": []
+    },
+    {
+      "id": "s21",
+      "split": "tune",
+      "query": "what temperature does the bread bake at",
+      "relevant": ["recipes/sourdough"]
+    },
+    {
+      "id": "s22",
+      "split": "held",
+      "query": "who should I ask about the payments code",
+      "relevant": ["people/priya-shah"]
+    },
+    {
+      "id": "s23",
+      "split": "tune",
+      "query": "did the beta date change",
+      "relevant": ["meetings/2026-04-02-larkspur-sync"]
+    },
+    {
+      "id": "s24",
+      "split": "held",
+      "query": "what should I bring on a trip",
+      "relevant": ["travel/packing-list"]
+    },
+    {
+      "id": "s25",
+      "split": "tune",
+      "query": "advice about focus and checking email",
+      "relevant": ["reading/deep-work"]
+    },
+    {
+      "id": "s26",
+      "split": "held",
+      "query": "how much will the Japan trip cost",
+      "relevant": ["travel/japan-2027"]
+    },
+    {
+      "id": "s27",
+      "split": "tune",
+      "query": "when is Ben's birthday",
+      "relevant": []
+    },
+    {
+      "id": "s28",
+      "split": "held",
+      "query": "what did the plumber quote for the bathroom",
+      "relevant": []
+    }
+  ]
+}

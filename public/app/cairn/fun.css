@@ -1,0 +1,147 @@
+/* Parody features (loaded only when Serious mode is off). Colours come from owg-css tokens. */
+
+/* Memory Score™ on /app */
+.memory-score {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 1.75rem;
+  margin: 1rem 0 1.5rem;
+  padding: 1rem 1.25rem;
+  border: var(--owg-border-width, 1px) solid var(--owg-border);
+  border-radius: var(--owg-radius-lg, 8px);
+  text-align: start;
+}
+.memory-score .ms-dial {
+  flex: 0 0 auto;
+  width: min(200px, 100%);
+  text-align: center;
+}
+.memory-score .ms-text {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+.memory-score h2 {
+  margin-top: 0;
+}
+.ms-gauge {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.ms-gauge path {
+  fill: none;
+  stroke-width: 16;
+  stroke-linecap: round;
+}
+.ms-gauge .ms-track {
+  stroke: var(--owg-border);
+}
+.ms-gauge .ms-value {
+  stroke: var(--owg-accent);
+}
+.ms-gauge .ms-needle {
+  stroke: var(--owg-text, currentColor);
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+.ms-gauge .ms-hub {
+  fill: currentColor;
+}
+.ms-number {
+  margin: -0.5rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.ms-number strong {
+  font-size: 2rem;
+}
+
+/* Recall Wrapped */
+ol.wrapped {
+  list-style: none;
+  padding: 0;
+  margin: 1.5rem 0;
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+}
+.wrapped-item {
+  margin: 0;
+}
+.wrapped-card {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 18px;
+  box-shadow: var(--owg-shadow);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wrapped-item {
+    animation: wrapped-in 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+  .wrapped-item:nth-child(2) {
+    animation-delay: 0.12s;
+  }
+  .wrapped-item:nth-child(3) {
+    animation-delay: 0.24s;
+  }
+  .wrapped-item:nth-child(4) {
+    animation-delay: 0.36s;
+  }
+  .wrapped-item:nth-child(5) {
+    animation-delay: 0.48s;
+  }
+  .wrapped-item:nth-child(6) {
+    animation-delay: 0.6s;
+  }
+}
+@keyframes wrapped-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Konami code: "Rated M for Memory" mode */
+.rated-m-banner {
+  position: fixed;
+  left: 1rem;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 50;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 0.75rem 1rem;
+  border: 3px solid currentColor;
+  border-radius: 6px;
+  background: var(--owg-bg);
+  box-shadow: var(--owg-shadow);
+}
+.rated-m-banner .rated-m-badge {
+  font-weight: 900;
+  font-size: 1.6rem;
+  line-height: 1;
+  padding: 0.2rem 0.45rem;
+  border: 3px solid currentColor;
+}
+.rated-m-banner p {
+  flex: 1 1 14rem;
+  margin: 0;
+  font-size: 0.875em;
+}
+html.rated-m main h1 {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+html.rated-m main h1::after {
+  content: " ™";
+  color: var(--owg-pink);
+}

@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect your agent — Cairn</title>
+<meta name="description" content="How to connect claude.ai or Claude Code to Cairn, your markdown memory server, in five steps.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#07060c">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/landing/style.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Connect your agent to Cairn">
+<meta property="og:description" content="Five steps from zero to an AI that remembers. About ninety seconds of your one precious life.">
+<meta property="og:image" content="https://cairn.onewheelgeek.net/landing/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<script src="/landing/site.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="g-brand" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#ff8a3d"/><stop offset=".5" stop-color="#ff3d8b"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient>
+    <symbol id="i-cairn" viewBox="0 0 64 64"><g fill="url(#g-brand)"><ellipse cx="32" cy="52" rx="22" ry="8"/><ellipse cx="31" cy="38.5" rx="16" ry="6.5"/><ellipse cx="33" cy="27" rx="11.5" ry="5.2"/><ellipse cx="32" cy="17.5" rx="7.5" ry="4"/></g><circle cx="32" cy="8.5" r="2.8" fill="currentColor"/></symbol>
+  </defs>
+</svg>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Cairn home"><svg aria-hidden="true"><use href="#i-cairn"/></svg>Cairn<span class="tm">™</span></a>
+    <nav class="nav" aria-label="Primary">
+      <a href="/#features">Features</a>
+      <a href="/#pricing">Pricing</a>
+      <a href="/#faq">FAQ</a>
+      <a href="/connect" aria-current="page">Connect</a>
+    </nav>
+    <div class="header-cta">
+      <a class="signin" href="/login">Sign in</a>
+      <a class="btn btn-primary btn-sm" href="/signup">Sign up</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+<section class="hero page-hero" aria-labelledby="title">
+  <div class="wrap">
+    <p class="eyebrow">Quickstart</p>
+    <h1 id="title">Connect your agent.<br><span class="grad-text">Ascend.</span></h1>
+    <p class="lede">Five steps from an assistant with the memory of a mayfly to one that remembers your coffee ratio forever. Takes about two minutes. The jokes on this page are light; the instructions are exact.</p>
+  </div>
+</section>
+
+<section class="section" aria-label="Steps" style="padding-top:56px">
+  <div class="wrap" style="max-width:900px">
+    <ol class="steps">
+      <li class="step">
+        <div>
+          <h2>Sign up with a passkey</h2>
+          <p>Go to <a href="/signup"><code>/signup</code></a>, pick a username, and create a passkey with your device (Touch ID, Face ID, Windows Hello, Android, or a security key). No password, no email.</p>
+          <p>You’ll be shown <strong>ten recovery codes</strong>. Save them somewhere that isn’t Cairn: they are the only way back in if you lose every passkey. While you’re there, add a second passkey on another device.</p>
+          <p class="aside">A personal vault called <code>main</code> is created for you. That’s where your agent writes unless you tell it otherwise.</p>
+        </div>
+      </li>
+
+      <li class="step">
+        <div>
+          <h2>Connect claude.ai</h2>
+          <ol>
+            <li>In claude.ai, open <span class="kbd-path">Settings → Connectors</span>.</li>
+            <li>Choose <span class="kbd-path">Add custom connector</span>.</li>
+            <li>Name it <code>Cairn</code> and paste this URL:</li>
+          </ol>
+          <div class="codeblock"><pre><code>https://cairn.onewheelgeek.net/mcp</code></pre><button class="copy" type="button" hidden>Copy</button></div>
+          <p>Click <span class="kbd-path">Connect</span>. Cairn’s sign-in and consent page opens: sign in with your passkey, check which app is asking and where it will send you back, and approve. You’re returned to claude.ai with Cairn’s tools enabled.</p>
+          <p class="aside">On a Team or Enterprise plan, an owner may need to add the connector for the organisation first.</p>
+        </div>
+      </li>
+
+      <li class="step">
+        <div>
+          <h2>Connect Claude Code</h2>
+          <p>In a terminal:</p>
+          <div class="codeblock"><pre><code>claude mcp add --transport http cairn https://cairn.onewheelgeek.net/mcp</code></pre><button class="copy" type="button" hidden>Copy</button></div>
+          <p>Then, inside Claude Code, run <code>/mcp</code>, pick <code>cairn</code> and choose <span class="kbd-path">Authenticate</span>. Your browser opens the same sign-in and consent page; approve it and come back.</p>
+          <p class="aside">Add <code>--scope user</code> to make Cairn available in every project, not just the current one. Access tokens last an hour and refresh themselves; you shouldn’t have to sign in again for weeks.</p>
+        </div>
+      </li>
+
+      <li class="step">
+        <div>
+          <h2>Let your assistant finish the setup</h2>
+          <p>Paste this line into Claude (claude.ai, Desktop or Code) or Codex:</p>
+          <div class="codeblock"><pre><code>Set up Cairn for me: read https://cairn.onewheelgeek.net/setup.md and follow it.</code></pre><button class="copy" type="button" hidden>Copy</button></div>
+          <p>It checks the connection (and tells you exactly how to add it if it isn’t there yet), asks a few questions about how you’ll use Cairn, installs the matching skills, and saves your answers as a pinned note, <code>memory/how-i-use-cairn</code>, quoting the receipt. Delete that note to undo.</p>
+          <p class="aside">The instructions it reads are public: <a href="/setup.md"><code>/setup.md</code></a>. The skills are at <a href="/skills/index.json"><code>/skills/index.json</code></a>.</p>
+        </div>
+      </li>
+
+      <li class="step">
+        <div>
+          <h2>Try it</h2>
+          <p>In a new chat, say:</p>
+          <div class="codeblock"><pre><code>Remember that I take my coffee 1:16</code></pre><button class="copy" type="button" hidden>Copy</button></div>
+          <p>Your agent calls <code>write_note</code> and quotes a <strong>receipt</strong>, something like:</p>
+          <div class="codeblock"><pre><code>saved main/coffee-preferences rev 3f9a1c2 at 2026-11-04T09:14Z</code></pre></div>
+          <p>No receipt means it didn’t save. Now open a <em>different</em> chat and ask “How do I take my coffee?”. It will search, find the note, and answer. Feel the goosebumps. You can also see the note in the <a href="/app">web viewer</a>.</p>
+        </div>
+      </li>
+
+      <li class="step">
+        <div>
+          <h2>Take it all with you</h2>
+          <p>In the web app, <span class="kbd-path">Settings → Download everything</span> gives you a zip of every note as markdown, one file per note, with <code>[[links]]</code> intact. It opens in Obsidian or Basic Memory as-is. Do it whenever you like; it’s your stuff.</p>
+        </div>
+      </li>
+    </ol>
+
+    <div class="callout" id="tools">
+      <h2>The tools your agent gets</h2>
+      <p style="color:var(--text-2)">Every tool that changes something returns a receipt. The parameters match Basic Memory’s, so moving a Basic Memory skill over is mostly a rename.</p>
+      <div class="table-scroll">
+        <table class="tools">
+          <thead><tr><th scope="col">Tool</th><th scope="col">What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>write_note</code></td><td>Create or overwrite a note (title, folder, markdown content). Returns a receipt.</td></tr>
+            <tr><td><code>read_note</code></td><td>Read a note by permalink, title or <code>memory://</code> URL.</td></tr>
+            <tr><td><code>edit_note</code></td><td>Change a note in place: append, prepend, find-and-replace, or replace a section, guarded against overwriting someone else’s change.</td></tr>
+            <tr><td><code>search_notes</code></td><td>Hybrid keyword and semantic search; returns compact results (title, permalink, matching lines).</td></tr>
+            <tr><td><code>find_notes</code></td><td>Find notes anywhere by file name or frontmatter (status, type, …).</td></tr>
+            <tr><td><code>list_notes</code></td><td>List the notes in a folder.</td></tr>
+            <tr><td><code>build_context</code></td><td>Read a note plus the notes it links to, one to three hops out.</td></tr>
+            <tr><td><code>move_note</code></td><td>Move or rename a note or folder; links keep working.</td></tr>
+            <tr><td><code>delete_note</code></td><td>Delete a note (History can bring it back).</td></tr>
+            <tr><td><code>core_memory</code></td><td>Load your index note and pinned notes at the start of a conversation.</td></tr>
+            <tr><td><code>supersede</code></td><td>Replace a fact without losing it: the old one is kept, dated.</td></tr>
+            <tr><td><code>attach_file</code></td><td>Attach a file to a note.</td></tr>
+            <tr><td><code>check_schema</code></td><td>Check notes of a type against its schema, or suggest one.</td></tr>
+            <tr><td><code>projects</code></td><td>List, create or inspect your projects.</td></tr>
+            <tr><td><code>recent_activity</code></td><td>See what changed recently.</td></tr>
+            <tr><td><code>help</code></td><td>Cairn’s manual, generated from the tools themselves.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="callout">
+      <h2>If something’s off</h2>
+      <ul>
+        <li><strong>The connector says it isn’t authorised.</strong> In Claude Code run <code>/mcp</code> and authenticate again; in claude.ai, disconnect and reconnect the connector.</li>
+        <li><strong>The agent says it saved, but there’s no receipt.</strong> It didn’t save. Ask it to try again and quote the receipt.</li>
+        <li><strong>You lost your passkey.</strong> Use a recovery code at <a href="/login">sign in</a>, then add a new passkey straight away.</li>
+        <li><strong>Notes are text, not orders.</strong> A good agent treats what’s in a note as information, never as instructions to follow.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="finale" aria-labelledby="finale-title" style="padding:88px 0">
+  <div class="wrap">
+    <h2 id="finale-title" style="font-size:clamp(2.2rem,5vw,3.8rem)">Ready to <span class="grad-text">never forget</span>?</h2>
+    <div class="hero-ctas">
+      <a class="btn btn-primary" href="/signup">Sign up with a passkey</a>
+      <a class="btn btn-ghost" href="/">Back to the hype</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p class="honest" style="margin-top:0"><b>Honest bit:</b> Cairn is a personal project and a parody of AI memory marketing. The testimonials on the home page are invented. The software, and everything on this page, is real.</p>
+    <p class="copyright">© 2026 Cairn · <a href="/">Home</a> · <a href="/login">Sign in</a> · <a href="/signup">Sign up</a></p>
+  </div>
+</footer>
+</body>
+</html>

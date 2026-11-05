@@ -1,0 +1,37 @@
+From: Calendar <{{FROM}}>
+To: {{TO}}
+Subject: {{SUBJECT_PREFIX}}Invitation: Planning sync @ Fri Nov 6, 2026 10am
+Date: Thu, 05 Nov 2026 12:00:00 +0000
+Message-ID: <cal-{{NONCE}}@calendar.example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="calb"
+
+--calb
+Content-Type: multipart/alternative; boundary="cala"
+
+--cala
+Content-Type: text/plain; charset=UTF-8
+
+You have been invited to Planning sync.
+
+--cala
+Content-Type: text/calendar; charset=UTF-8; method=REQUEST
+
+BEGIN:VCALENDAR
+METHOD:REQUEST
+BEGIN:VEVENT
+SUMMARY:Planning sync
+DTSTART:20261106T170000Z
+END:VEVENT
+END:VCALENDAR
+
+--cala--
+
+--calb
+Content-Type: application/ics; name="invite.ics"
+Content-Disposition: attachment; filename="invite.ics"
+Content-Transfer-Encoding: base64
+
+QkVHSU46VkNBTEVOREFSDQpNRVRIT0Q6UkVRVUVTVA0KRU5EOlZDQUxFTkRBUg0K
+
+--calb--

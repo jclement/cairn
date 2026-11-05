@@ -1,0 +1,98 @@
+{
+  "name": "cairn",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cairn: a self-hostable memory system for AI assistants on Cloudflare Workers",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build-client.mjs && tailwindcss -i src/ui/app.css -o public/app/ui/app.css --minify",
+    "deploy": "npm run build && wrangler d1 migrations apply DB --remote && wrangler deploy",
+    "setup:cloudflare": "node scripts/setup-cloudflare.mjs",
+    "dev": "mise run dev",
+    "test": "mise run test"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^1.2.4",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "@simplewebauthn/server": "^14.0.3",
+    "agents": "^0.33.0",
+    "fflate": "^0.8.3",
+    "highlight.js": "^11.12.0",
+    "hono": "^4.13.16",
+    "markdown-it": "^15.0.3",
+    "markdown-it-footnote": "^4.0.0",
+    "postal-mime": "^4.2.0",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.5",
+    "@cloudflare/vitest-plugin": "^1.5.1",
+    "@cloudflare/workers-types": "^5.20261104.1",
+    "@codemirror/autocomplete": "^6.20.4",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "@lezer/highlight": "^1.2.5",
+    "@tailwindcss/cli": "^4.3.4",
+    "@types/markdown-it": "^14.2.0",
+    "@types/markdown-it-footnote": "^3.0.4",
+    "codemirror": "^6.0.2",
+    "d3-force-3d": "^3.0.6",
+    "esbuild": "^0.28.2",
+    "force-graph": "^1.52.0",
+    "mermaid": "^12.3.0",
+    "tailwindcss": "^4.3.4",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.12",
+    "wrangler": "^4.157.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "workerd@1.20261103.1": true,
+    "core-js-pure": false
+  },
+  "cloudflare": {
+    "bindings": {
+      "DB": {
+        "description": "D1 directory: users, passkeys, sessions, projects, tokens, invites, quotas and usage. Migrations in migrations/ run on deploy."
+      },
+      "OAUTH_KV": {
+        "description": "KV for the OAuth provider: registered clients, grants and (hashed) tokens."
+      },
+      "VAULT": {
+        "description": "Durable Object class VaultDO: one SQLite database per project holding the notes, search index and revisions."
+      },
+      "VECTORIZE": {
+        "description": "Vectorize index cairn-notes (1024 dimensions, cosine) for semantic search. Optional: without it search is keyword-only."
+      },
+      "AI": {
+        "description": "Workers AI: embeddings, Jev (hints and re-ranking), image captions, weekly digests. Optional; capped per user by AI_DAILY_TOKENS."
+      },
+      "FILES": {
+        "description": "R2 bucket cairn-files for attachments and images. Optional: without it uploads and email attachments are refused."
+      },
+      "ASSETS": {
+        "description": "Static files in public/ (landing site, styles, browser bundles)."
+      },
+      "PUBLIC_URL": {
+        "description": "The URL people will use, e.g. https://cairn.example.com or your workers.dev URL. Passkeys and OAuth are bound to it: set it before anyone signs up."
+      },
+      "APP_NAME": {
+        "description": "Name shown in the app and on the consent page."
+      },
+      "OPEN_SIGNUP": {
+        "description": "\"true\" lets anyone sign up; \"false\" requires an invite link."
+      },
+      "INBOUND_EMAIL_ADDRESS": {
+        "description": "Address for email capture (needs an Email Routing rule sending it to this Worker). Remove to turn email capture off."
+      },
+      "CAIRN_SETUP_TOKEN": {
+        "description": "Secret. Whoever presents it at sign-up or in Settings → Admin becomes an admin. Use a long random string."
+      }
+    }
+  }
+}

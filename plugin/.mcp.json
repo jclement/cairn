@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "cairn": {
+      "type": "http",
+      "url": "${CAIRN_URL:-https://cairn.onewheelgeek.net}/mcp"
+    }
+  }
+}

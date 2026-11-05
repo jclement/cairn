@@ -1,0 +1,74 @@
+[tools]
+node = "24"
+
+[tasks.setup]
+description = "Install dependencies (idempotent)"
+run = "npm ci --no-audit --no-fund"
+sources = ["package-lock.json"]
+outputs = ["node_modules/.package-lock.json"]
+
+[tasks."migrate:local"]
+description = "Apply D1 migrations to the local (Miniflare) database"
+env = { CI = "true" } # non-interactive: skips wrangler's confirmation prompt
+run = "npx wrangler d1 migrations apply DB --local --env local"
+
+[tasks."build:client"]
+description = "Bundle the app's browser code (src/client/*.ts -> public/app/dist/*.js) and compile its Tailwind CSS (src/ui/app.css -> public/app/ui/app.css)"
+run = ["node scripts/build-client.mjs", "npx @tailwindcss/cli -i src/ui/app.css -o public/app/ui/app.css --minify"]
+sources = ["src/client/**/*.ts", "src/web/**/*.ts", "src/ui/**/*.css", "public/app/cairn/*.js", "src/markdown/parse.ts", "scripts/build-client.mjs", "package-lock.json"]
+outputs = ["public/app/dist/app.js", "public/app/dist/search.js", "public/app/dist/editor.js", "public/app/dist/graph.js", "public/app/dist/mermaid.js", "public/app/ui/app.css"]
+
+[tasks.dev]
+description = "Run the Worker locally at http://localhost:8787 (applies local D1 migrations first)"
+depends = ["migrate:local", "build:client"]
+run = "npx wrangler dev --env local --port 8787"
+
+[tasks.test]
+description = "Run the test suite in workerd (non-interactive)"
+depends = ["build:client"]
+run = "npx vitest run"
+
+[tasks."prod:status"]
+description = "Production health: deployed version, migrations, AI failure rates, cron, counts, stuck imports, email, Vectorize. Needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID; exits 1 on a red flag"
+run = "node scripts/prod-status.mjs"
+
+[tasks."plugin:sync"]
+description = "Copy skills/ into the Claude Code plugin (plugin/skills/) and the Worker (src/setup/skills.gen.ts)"
+run = "node scripts/sync-plugin-skills.mjs"
+
+[tasks.lint]
+description = "Typecheck, lint and format-check. Read-only."
+run = ["npx tsc --noEmit", "npx tsc --noEmit -p src/client", "npx biome check .", "node scripts/sync-plugin-skills.mjs --check"]
+
+[tasks.fmt]
+description = "Format and apply safe lint fixes"
+run = "npx biome check --write ."
+
+[tasks.check]
+description = "The done-gate: lint + test + adversarial probes"
+depends = ["lint", "test", "probe"]
+
+[tasks.probe]
+description = "Adversarial parser probes under an isolated deadline (a worker thread killed after 2 s)"
+run = "node scripts/probe-schema-parser.mjs"
+
+[tasks.deploy]
+description = "Apply remote D1 migrations, then deploy (CI does this on every push to main)"
+depends = ["build:client"]
+run = ["npx wrangler d1 migrations apply DB --remote", "npx wrangler deploy"]
+
+[tasks."setup:cloudflare"]
+description = "One-command setup of your own instance: create the Cloudflare resources, write their ids and your URL into wrangler.jsonc, migrate, deploy, set the setup token. Args: --url https://cairn.example.com, --email, --open-signup, --dry-run"
+run = "node scripts/setup-cloudflare.mjs"
+
+[tasks."oauth:live"]
+description = "Live OAuth client-compatibility test: Claude Code, claude.ai and a DCR client against the live site (throwaway account, deleted after)"
+run = "node scripts/oauth-live.mjs"
+
+[tasks."smoke:live"]
+description = "End-to-end smoke test against the live site (virtual passkey; creates and deletes a throwaway account)"
+run = "node scripts/smoke-live.mjs"
+
+[tasks."jev:eval"]
+description = "Evaluate the Jev questions against the real model on test/fixtures/jev (needs CLOUDFLARE_API_TOKEN with Workers AI access; responses cached in ~/.cache/cairn-jev-eval). Args: --split tune|held|all, --only search|hints, --verbose"
+run = "node scripts/jev-eval.mjs"

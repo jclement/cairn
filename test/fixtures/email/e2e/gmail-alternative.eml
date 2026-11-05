@@ -1,0 +1,35 @@
+Received: by mail-wr1-f41.google.com with SMTP id 5b1f17b1804b1-43;
+        Tue, 03 Nov 2026 09:14:02 -0800 (PST)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=gmail.com; s=20230601;
+        h=to:subject:message-id:date:from:mime-version:from:to:cc:subject;
+        bh=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=;
+        b=Zm9vYmFyYmF6
+MIME-Version: 1.0
+From: Jeff Example <{{FROM}}>
+Date: Tue, 3 Nov 2026 09:13:51 -0800
+Message-ID: <CAJ+{{NONCE}}@mail.gmail.com>
+Subject: {{SUBJECT_PREFIX}}Notes from the vendor call
+To: {{TO}}
+Content-Type: multipart/alternative; boundary="000000000000a1b2c3d4e5f6"
+
+--000000000000a1b2c3d4e5f6
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+Quick notes from today=E2=80=99s call with Northwind:
+
+- [decision] Renew for 12 months, not 36
+- [risk] Their SSO connector is still beta
+- follow_up [[Dana Roe]]
+
+=E2=80=94 Jeff
+
+--000000000000a1b2c3d4e5f6
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+<div dir=3D"ltr">Quick notes from today=E2=80=99s call with Northwind:<br><ul=
+><li>[decision] Renew for 12 months, not 36</li><li>HTML-ONLY-MARKER</li></ul=
+></div>
+
+--000000000000a1b2c3d4e5f6--

@@ -1,0 +1,9 @@
+Authentication-Results: mx.cloudflare.net; spf=pass smtp.mailfrom=example.org; dkim=pass header.d=example.org header.s=s1; dmarc=pass header.from=example.org
+From: Trusted Person <trusted@example.org>
+To: cairn@example.test
+Subject: Allowlisted note
+Date: Wed, 04 Nov 2026 08:00:00 +0000
+Message-ID: <allow-{{NONCE}}@example.org>
+Content-Type: text/plain; charset=utf-8
+
+From my allowlisted address.

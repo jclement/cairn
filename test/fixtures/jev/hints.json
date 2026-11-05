@@ -1,0 +1,221 @@
+{
+  "about": "Write-hint cases. candidates: corpus permalinks (or inline notes) the vault's FTS would find. dup: candidates the new note duplicates. conflicts: [new observation, old observation] pairs that cannot both be true; every other same-category pair is expected compatible. kind is for reporting only.",
+  "cases": [
+    {
+      "id": "h01",
+      "split": "tune",
+      "kind": "true duplicate",
+      "isNew": true,
+      "note": {
+        "title": "Dana Roe (Larkspur PM)",
+        "type": "person",
+        "body": "# Dana Roe (Larkspur PM)\n\nPM at Larkspur Water, runs the billing portal.\n\n- [contact] Prefers email over phone calls"
+      },
+      "candidates": ["people/dana-roe", "orgs/larkspur-water", "projects/billing-portal-redesign"],
+      "dup": ["people/dana-roe"],
+      "conflicts": []
+    },
+    {
+      "id": "h02",
+      "split": "held",
+      "kind": "true duplicate",
+      "isNew": true,
+      "note": {
+        "title": "Sourdough bread",
+        "type": "recipe",
+        "body": "# Sourdough bread\n\n- [ingredients] 500 g bread flour, 350 g water, 100 g starter, 10 g salt\n- [bake] Dutch oven at 250 C"
+      },
+      "candidates": ["recipes/sourdough", "recipes/pancakes", "ideas/side-project-ideas"],
+      "dup": ["recipes/sourdough"],
+      "conflicts": []
+    },
+    {
+      "id": "h03",
+      "split": "tune",
+      "kind": "true duplicate",
+      "isNew": true,
+      "note": {
+        "title": "Heat pumps",
+        "type": "research",
+        "body": "# Heat pumps\n\nNotes from looking into replacing the furnace with a heat pump.\n\n- [finding] Cold-climate models work to about -25 C\n- [rebate] Federal grant up to 5,000 CAD"
+      },
+      "candidates": ["research/heat-pumps", "home/furnace", "research/solar-panels"],
+      "dup": ["research/heat-pumps"],
+      "conflicts": []
+    },
+    {
+      "id": "h04",
+      "split": "held",
+      "kind": "near but distinct",
+      "isNew": true,
+      "note": {
+        "title": "Larkspur Water billing team",
+        "type": "organization",
+        "body": "# Larkspur Water billing team\n\nThe team inside Larkspur that handles customer invoices.\n\n- [contact] Team lead is Omar Haddad"
+      },
+      "candidates": ["orgs/larkspur-water", "people/dana-roe", "projects/billing-portal-redesign"],
+      "dup": [],
+      "conflicts": []
+    },
+    {
+      "id": "h05",
+      "split": "tune",
+      "kind": "near but distinct",
+      "isNew": true,
+      "note": {
+        "title": "Banana pancakes",
+        "type": "recipe",
+        "body": "# Banana pancakes\n\nGluten-free version for Mia's friend.\n\n- [ingredients] 2 bananas, 2 eggs, 1/2 cup oat flour\n- [tip] Cook on low heat; they burn easily"
+      },
+      "candidates": ["recipes/pancakes", "recipes/sourdough"],
+      "dup": [],
+      "conflicts": []
+    },
+    {
+      "id": "h06",
+      "split": "held",
+      "kind": "near but distinct",
+      "isNew": true,
+      "note": {
+        "title": "Japan trip 2025 recap",
+        "type": "journal",
+        "body": "# Japan trip 2025 recap\n\nWhat we did on the last trip.\n\n- [route] Tokyo and Hakone only\n- [lesson] Book trains a day ahead in Golden Week"
+      },
+      "candidates": ["travel/japan-2027", "travel/packing-list"],
+      "dup": [],
+      "conflicts": []
+    },
+    {
+      "id": "h07",
+      "split": "tune",
+      "kind": "real contradiction",
+      "isNew": false,
+      "note": { "title": "Larkspur Water", "type": "organization", "body": "# Larkspur Water\n\n- [contact] Main contact is Omar Haddad" },
+      "candidates": [
+        {
+          "permalink": "orgs/larkspur-water-old",
+          "title": "Larkspur Water (2025 notes)",
+          "type": "organization",
+          "body": "# Larkspur Water (2025 notes)\n\n- [contact] Main contact is Dana Roe\n- [billing] Invoices net 30"
+        },
+        "people/dana-roe"
+      ],
+      "dup": [],
+      "conflicts": [["Main contact is Omar Haddad", "Main contact is Dana Roe"]]
+    },
+    {
+      "id": "h08",
+      "split": "held",
+      "kind": "real contradiction",
+      "isNew": true,
+      "note": { "title": "Portal beta date", "type": "note", "body": "# Portal beta date\n\n- [deadline] Billing portal beta launches on 2026-05-01" },
+      "candidates": ["projects/billing-portal-redesign", "meetings/2026-04-02-larkspur-sync"],
+      "dup": [],
+      "conflicts": [["Billing portal beta launches on 2026-05-01", "Beta launch on 2026-06-15"]]
+    },
+    {
+      "id": "h09",
+      "split": "tune",
+      "kind": "real contradiction",
+      "isNew": true,
+      "note": { "title": "Furnace filter size", "type": "note", "body": "# Furnace filter size\n\n- [filter] The furnace takes 20x25x1 filters" },
+      "candidates": ["home/furnace", "research/heat-pumps"],
+      "dup": [],
+      "conflicts": [["The furnace takes 20x25x1 filters", "Uses 16x25x1 filters, replace every 3 months"]]
+    },
+    {
+      "id": "h10",
+      "split": "held",
+      "kind": "compatible update",
+      "isNew": true,
+      "note": {
+        "title": "Dana Roe working hours",
+        "type": "note",
+        "body": "# Dana Roe working hours\n\n- [contact] Dana is reachable on Slack during the day\n- [preference] Dana takes Fridays off in summer"
+      },
+      "candidates": ["people/dana-roe", "orgs/larkspur-water"],
+      "dup": [],
+      "conflicts": []
+    },
+    {
+      "id": "h11",
+      "split": "tune",
+      "kind": "compatible update",
+      "isNew": false,
+      "note": {
+        "title": "Car: 2018 Subaru Outback",
+        "type": "note",
+        "body": "# Car: 2018 Subaru Outback\n\n- [maintenance] Brake pads replaced in March 2026\n- [tires] Summer tires stored at the dealer"
+      },
+      "candidates": [
+        {
+          "permalink": "home/car-2025",
+          "title": "Car notes 2025",
+          "type": "note",
+          "body": "# Car notes 2025\n\n- [maintenance] Oil change every 8,000 km, synthetic 0W-20\n- [tires] Winter tires go on in late October"
+        }
+      ],
+      "dup": [],
+      "conflicts": []
+    },
+    {
+      "id": "h12",
+      "split": "held",
+      "kind": "compatible update",
+      "isNew": true,
+      "note": {
+        "title": "Running plan: autumn",
+        "type": "plan",
+        "body": "# Running plan: autumn\n\n- [schedule] Add a Thursday tempo run from October\n- [goal] Try a 10 km race in November"
+      },
+      "candidates": ["health/running-plan", "people/sam-okafor"],
+      "dup": [],
+      "conflicts": []
+    },
+    {
+      "id": "h13",
+      "split": "tune",
+      "kind": "superseded fact",
+      "isNew": true,
+      "note": {
+        "title": "Database choice revisited",
+        "type": "decision",
+        "body": "# Database choice revisited\n\n- [decision] Switched the billing portal from Postgres to MySQL in May 2026"
+      },
+      "candidates": ["decisions/use-postgres-for-portal", "projects/billing-portal-redesign"],
+      "dup": [],
+      "conflicts": [["Switched the billing portal from Postgres to MySQL in May 2026", "Chose Postgres over MongoDB for the billing portal"]]
+    },
+    {
+      "id": "h14",
+      "split": "held",
+      "kind": "superseded fact",
+      "isNew": false,
+      "note": { "title": "Priya Shah", "type": "person", "body": "# Priya Shah\n\n- [timezone] Moved to Toronto in 2026, now UTC-5" },
+      "candidates": [
+        {
+          "permalink": "people/priya-shah-2025",
+          "title": "Priya Shah (old)",
+          "type": "person",
+          "body": "# Priya Shah (old)\n\n- [timezone] Works from Lisbon, UTC+0\n- [role] Owns the payments integration"
+        }
+      ],
+      "dup": [],
+      "conflicts": [["Moved to Toronto in 2026, now UTC-5", "Works from Lisbon, UTC+0"]]
+    },
+    {
+      "id": "h15",
+      "split": "tune",
+      "kind": "superseded fact",
+      "isNew": true,
+      "note": {
+        "title": "Tax deadline update",
+        "type": "note",
+        "body": "# Tax deadline update\n\n- [deadline] Personal returns are due June 15 this year because I'm self-employed now"
+      },
+      "candidates": ["money/taxes", "money/budget-2026"],
+      "dup": [],
+      "conflicts": [["Personal returns are due June 15 this year because I'm self-employed now", "Personal returns due April 30"]]
+    }
+  ]
+}

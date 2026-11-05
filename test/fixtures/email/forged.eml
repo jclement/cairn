@@ -1,0 +1,9 @@
+Authentication-Results: mx.cloudflare.net; spf=fail smtp.mailfrom=attacker.test; dkim=none; dmarc=fail header.from=example.org
+Authentication-Results: mx.cloudflare.net; dkim=pass header.d=example.org; dmarc=pass header.from=example.org
+From: Trusted Person <trusted@example.org>
+To: cairn@example.test
+Subject: Forged sender
+Message-ID: <forged-{{NONCE}}@attacker.test>
+Content-Type: text/plain; charset=utf-8
+
+I am not really trusted.

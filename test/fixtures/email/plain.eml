@@ -1,0 +1,13 @@
+Return-Path: <alice@example.com>
+From: Alice Example <alice@example.com>
+To: cairn+{{KEY}}@example.test
+Subject: Lunch ideas for the offsite
+Date: Tue, 03 Nov 2026 10:15:00 -0700
+Message-ID: <plain-{{NONCE}}@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Thai place on 5th was good.
+
+- [idea] Book the back room
+- relates_to [[Offsite Planning]]

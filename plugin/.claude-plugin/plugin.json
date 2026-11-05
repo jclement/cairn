@@ -1,0 +1,8 @@
+{
+  "name": "cairn",
+  "version": "0.1.0",
+  "description": "Long-term memory for Claude Code via a Cairn server: MCP connection, skills (cairn-notes, cairn-continue, cairn-capture, cairn-gardening, cairn-tasks) and a session-start reminder to load core memory.",
+  "author": { "name": "Jeff Clement" },
+  "homepage": "https://cairn.onewheelgeek.net",
+  "license": "MIT"
+}

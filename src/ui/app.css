@@ -1,0 +1,620 @@
+/* Cairn app + auth pages. Tailwind v4, compiled at build time by `mise run build:client`
+   (src/ui/app.css -> public/app/ui/app.css). The landing page has its own stylesheet.
+   Brand: the landing page's orange -> pink -> violet gradient and the stacked-stones mark. */
+
+@import "tailwindcss";
+
+@source "../web";
+@source "../client";
+@source "../capture";
+@source "../../public/app/cairn/*.js";
+
+/* Collapsed desktop sidebar (html.sb-collapsed, toggled by /app/ui/ui.js). */
+@custom-variant collapsed (&:where(.sb-collapsed, .sb-collapsed *));
+
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url(/app/fonts/inter-latin-wght-normal.woff2) format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url(/app/fonts/inter-latin-ext-wght-normal.woff2) format("woff2");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---- semantic tokens (light / dark) ---- */
+:root {
+  --canvas: #f7f6fa;
+  --surface: #ffffff;
+  --raised: #fbfaff;
+  --sunken: #f1eff6;
+  --line: #e6e3ee;
+  --line-strong: #d3cee0;
+  --fg: #15121c;
+  --fg-2: #3b3647;
+  --muted: #625c70;
+  --faint: #8e889c;
+  --accent: #b3166c;
+  --accent-2: #6a2bd4;
+  --accent-soft: #fcebf3;
+  --violet-soft: #f1ebff;
+  --ok: #157a4a;
+  --ok-soft: #e6f6ee;
+  --warn: #8a5100;
+  --warn-soft: #fff4e0;
+  --danger: #c0262d;
+  --danger-soft: #fdecec;
+  --info: #1f5fbf;
+  --info-soft: #e8f0fd;
+  --focus: #7c3aed;
+  --shadow-card: 0 1px 2px rgb(20 16 40 / 0.05), 0 1px 3px rgb(20 16 40 / 0.06);
+  --shadow-pop: 0 10px 30px -10px rgb(20 16 40 / 0.25), 0 4px 10px -4px rgb(20 16 40 / 0.1);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #0b0a10;
+    --surface: #13111b;
+    --raised: #181522;
+    --sunken: #0f0d16;
+    --line: #262233;
+    --line-strong: #39334a;
+    --fg: #f4f1fb;
+    --fg-2: #d6cfe8;
+    --muted: #a59eb8;
+    --faint: #7a7390;
+    --accent: #ff7ab6;
+    --accent-2: #b79bff;
+    --accent-soft: rgb(255 122 182 / 0.12);
+    --violet-soft: rgb(183 155 255 / 0.12);
+    --ok: #4cd292;
+    --ok-soft: rgb(76 210 146 / 0.12);
+    --warn: #ffbf5e;
+    --warn-soft: rgb(255 191 94 / 0.11);
+    --danger: #ff7a7f;
+    --danger-soft: rgb(255 122 127 / 0.12);
+    --info: #7fb0ff;
+    --info-soft: rgb(127 176 255 / 0.12);
+    --focus: #c4a8ff;
+    --shadow-card: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-pop: 0 18px 40px -12px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(255 255 255 / 0.06);
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-accent-soft: var(--accent-soft);
+  --color-violet-soft: var(--violet-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-brand-orange: #ff8a3d;
+  --color-brand-pink: #ff3d8b;
+  --color-brand-violet: #8b5cf6;
+  --color-night: #0e0b17;
+  --shadow-card: var(--shadow-card);
+  --shadow-pop: var(--shadow-pop);
+}
+
+/* The older stylesheets (viewer.css, note.css, fun.css) use owg-css variable names: map them. */
+:root {
+  --owg-bg: var(--canvas);
+  --owg-surface: var(--surface);
+  --owg-surface-2: var(--sunken);
+  --owg-border: var(--line);
+  --owg-border-strong: var(--line-strong);
+  --owg-border-width: 1px;
+  --owg-text: var(--fg);
+  --owg-text-strong: var(--fg);
+  --owg-muted: var(--muted);
+  --owg-faint: var(--faint);
+  --owg-accent: var(--accent);
+  --owg-accent-ink: #fff;
+  --owg-amber: var(--warn);
+  --owg-red: var(--danger);
+  --owg-danger: var(--danger);
+  --owg-green: var(--ok);
+  --owg-blue: var(--info);
+  --owg-cyan: #0e8aa0;
+  --owg-purple: var(--accent-2);
+  --owg-pink: var(--accent);
+  --owg-radius: 0.5rem;
+  --owg-radius-lg: 0.75rem;
+  --owg-shadow: var(--shadow-pop);
+  --owg-font-mono: var(--font-mono);
+  --owg-text-sm: 0.875rem;
+  --owg-text-xs: 0.75rem;
+  --owg-tracking-caps: 0.06em;
+  --owg-transition: 150ms ease;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --owg-cyan: #5fd3e6;
+  }
+}
+
+/* ---- base: markup that isn't classed with utilities still looks right ---- */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-canvas font-sans text-[15px] leading-6 text-fg antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--accent) 25%, transparent);
+  }
+  a {
+    @apply text-accent underline-offset-2 hover:underline;
+  }
+  code,
+  kbd,
+  samp,
+  pre {
+    @apply font-mono;
+  }
+  main h1 {
+    @apply text-2xl font-semibold tracking-tight text-fg sm:text-[1.75rem];
+  }
+  main h2 {
+    @apply mt-8 mb-3 text-lg font-semibold tracking-tight text-fg;
+  }
+  main h3 {
+    @apply mt-6 mb-2 text-base font-semibold text-fg;
+  }
+  main p {
+    @apply my-3;
+  }
+  main ul.plain {
+    @apply my-3 space-y-1.5;
+  }
+  main table {
+    @apply my-4 w-full border-collapse overflow-hidden rounded-xl bg-surface text-sm shadow-card ring-1 ring-line;
+  }
+  main th {
+    @apply border-b border-line bg-raised px-4 py-2.5 text-left text-xs font-semibold tracking-wide text-muted uppercase;
+  }
+  main td {
+    @apply border-b border-line px-4 py-3 align-middle;
+  }
+  @media (max-width: 640px) {
+    main table {
+      display: block;
+      overflow-x: auto;
+    }
+  }
+  main tr:last-child > td {
+    @apply border-b-0;
+  }
+  main pre {
+    @apply overflow-x-auto rounded-lg bg-sunken p-3 text-[13px] leading-5 ring-1 ring-line;
+  }
+  main :not(pre) > code {
+    @apply rounded bg-sunken px-1.5 py-0.5 text-[0.85em] ring-1 ring-line;
+  }
+  main details > summary {
+    @apply cursor-pointer text-sm font-medium text-fg-2 select-none;
+  }
+  main label {
+    @apply mb-1.5 block text-sm font-medium text-fg-2;
+  }
+  main :is(input, select, textarea) + label {
+    @apply mt-4;
+  }
+  main label:has(> input[type="checkbox"], > input[type="radio"]) {
+    @apply flex items-center gap-2 font-normal;
+  }
+  input[type="text"],
+  input[type="search"],
+  input[type="password"],
+  input[type="email"],
+  input[type="number"],
+  input:not([type]),
+  select,
+  textarea {
+    @apply block w-full rounded-lg border-0 bg-surface px-3 py-2 text-sm text-fg shadow-xs ring-1 ring-line-strong transition outline-none placeholder:text-faint focus:ring-2 focus:ring-accent-2;
+  }
+  form.inline input[type="text"] {
+    @apply inline-block w-auto;
+  }
+  input[type="checkbox"],
+  input[type="radio"] {
+    @apply size-4 accent-[var(--accent-2)];
+  }
+  /* Buttons written without utility classes: plain = primary, .secondary, .danger, a.button. */
+  button:not([class]),
+  button.secondary,
+  button.danger,
+  button.ghost,
+  a.button,
+  input[type="submit"] {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold whitespace-nowrap text-white no-underline shadow-xs transition select-none hover:no-underline hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50;
+    background-image: linear-gradient(100deg, #c8186a, #6a2bd4);
+  }
+  button.secondary,
+  a.button.secondary,
+  button.ghost {
+    @apply bg-surface text-fg ring-1 ring-line-strong hover:bg-raised hover:brightness-100;
+    background-image: none;
+  }
+  button.danger,
+  a.button.danger {
+    @apply bg-[#d42b36] text-white;
+    background-image: none;
+  }
+  .button.small,
+  button.small {
+    @apply px-2.5 py-1.5 text-xs;
+  }
+  /* Any other <button> starts unstyled (utilities style it). */
+  button[class] {
+    @apply cursor-pointer;
+  }
+  dialog {
+    @apply rounded-2xl bg-surface text-fg shadow-pop ring-1 ring-line;
+  }
+  :where(dialog)::backdrop {
+    background: rgb(10 8 18 / 0.55);
+    backdrop-filter: blur(3px);
+  }
+  kbd {
+    @apply rounded border border-line-strong bg-surface px-1.5 py-px font-sans text-[11px] font-medium text-muted shadow-xs;
+  }
+  hr {
+    @apply my-6 border-line;
+  }
+}
+
+/* ---- components: the short names templates use ---- */
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold whitespace-nowrap no-underline shadow-xs transition select-none hover:no-underline;
+  }
+  .btn-sm {
+    @apply px-2.5 py-1.5 text-xs;
+  }
+  .btn-lg {
+    @apply px-5 py-2.5 text-[15px];
+  }
+  .btn-primary {
+    @apply text-white hover:brightness-110;
+    background: linear-gradient(100deg, #c8186a, #6a2bd4);
+  }
+  .btn-secondary {
+    @apply bg-surface text-fg ring-1 ring-line-strong hover:bg-raised;
+    background-image: none;
+  }
+  .btn-ghost {
+    @apply bg-transparent text-fg-2 shadow-none hover:bg-sunken;
+    background-image: none;
+  }
+  .btn-danger {
+    @apply bg-[#d42b36] text-white hover:brightness-110;
+    background-image: none;
+  }
+  .card {
+    @apply rounded-2xl bg-surface p-5 shadow-card ring-1 ring-line;
+  }
+  .card-head {
+    @apply mb-4 flex items-center justify-between gap-3;
+  }
+  .card-title {
+    @apply text-sm font-semibold text-fg;
+  }
+  .eyebrow {
+    @apply text-xs font-semibold tracking-wider text-muted uppercase;
+  }
+  .input {
+    @apply block w-full rounded-lg border-0 bg-surface px-3 py-2 text-sm text-fg shadow-xs ring-1 ring-line-strong outline-none placeholder:text-faint focus:ring-2 focus:ring-accent-2;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset;
+  }
+  .tag,
+  .chip-tag {
+    @apply inline-flex items-center rounded-full bg-violet-soft px-2 py-0.5 text-xs font-medium text-accent-2 no-underline ring-1 ring-accent-2/20 ring-inset hover:no-underline;
+  }
+  .tag::before {
+    content: "#";
+    opacity: 0.6;
+  }
+  .badge {
+    @apply inline-flex items-center rounded-md bg-sunken px-1.5 py-0.5 text-[11px] font-semibold tracking-wide text-muted uppercase ring-1 ring-line ring-inset;
+  }
+  .badge.red {
+    @apply bg-danger-soft text-danger ring-danger/20;
+  }
+  .callout {
+    @apply my-4 block rounded-xl bg-info-soft px-4 py-3 text-sm text-fg ring-1 ring-info/20;
+  }
+  .callout > svg:first-child {
+    @apply mr-2 inline-block align-[-0.3em];
+  }
+  .callout.tip {
+    @apply bg-ok-soft ring-ok/25;
+  }
+  .callout.warning,
+  .card.warn {
+    @apply bg-warn-soft ring-warn/25;
+  }
+  .stat-tile {
+    @apply rounded-2xl bg-surface p-4 shadow-card ring-1 ring-line;
+  }
+  .stat-tile dt {
+    @apply text-xs font-medium text-muted;
+  }
+  .stat-tile dd {
+    @apply mt-1 text-2xl font-semibold tracking-tight text-fg tabular-nums;
+  }
+  .tabs-bar {
+    @apply -mx-1 mb-6 flex gap-1 overflow-x-auto border-b border-line px-1;
+  }
+  .tabs-bar a,
+  .tabs-bar button {
+    @apply -mb-px shrink-0 rounded-none border-b-2 border-transparent bg-transparent px-3 py-2.5 text-sm font-medium text-muted no-underline shadow-none hover:border-line-strong hover:text-fg hover:no-underline;
+    background-image: none;
+  }
+  .tabs-bar [aria-current="page"],
+  .tabs-bar [aria-selected="true"] {
+    @apply border-accent text-fg;
+  }
+  .seg {
+    @apply inline-flex rounded-lg bg-sunken p-0.5 ring-1 ring-line;
+  }
+  .seg a {
+    @apply rounded-md px-3 py-1 text-sm font-medium text-muted no-underline hover:text-fg hover:no-underline;
+  }
+  .seg a[aria-current="page"] {
+    @apply bg-surface text-fg shadow-xs ring-1 ring-line;
+  }
+  .empty {
+    @apply flex flex-col items-center justify-center rounded-2xl border border-dashed border-line-strong px-6 py-10 text-center text-sm text-muted;
+  }
+  .muted {
+    @apply text-muted;
+  }
+  .faint {
+    @apply text-faint;
+  }
+  .small {
+    @apply text-sm;
+  }
+  .error {
+    @apply text-danger;
+  }
+  .label {
+    @apply mb-2 text-xs font-semibold tracking-wider text-muted uppercase;
+  }
+  .sr-only {
+    @apply absolute -m-px h-px w-px overflow-hidden p-0 whitespace-nowrap;
+    clip: rect(0, 0, 0, 0);
+  }
+  .brand-grad {
+    background: linear-gradient(100deg, #ff8a3d 0%, #ff3d8b 48%, #8b5cf6 100%);
+  }
+  .brand-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(100deg, #ff8a3d 0%, #ff3d8b 48%, #8b5cf6 100%);
+  }
+  /* Sidebar links */
+  .nav-link {
+    @apply flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium text-white/70 no-underline transition hover:bg-white/[0.06] hover:text-white hover:no-underline;
+  }
+  .nav-link[aria-current="page"] {
+    @apply bg-white/[0.09] text-white;
+  }
+  .nav-link svg {
+    @apply size-5 shrink-0 text-white/50;
+  }
+  .nav-link[aria-current="page"] svg {
+    @apply text-brand-pink;
+  }
+  .collapsed .nav-label {
+    @apply lg:sr-only;
+  }
+  .tab-link {
+    @apply flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-medium text-muted no-underline hover:no-underline;
+  }
+  .tab-link[aria-current="page"] {
+    @apply text-accent;
+  }
+  .tab-link svg {
+    @apply size-6;
+  }
+}
+
+/* ---- legacy page bits still rendered by older templates ---- */
+@layer components {
+  .crumbs {
+    @apply mb-2 flex flex-wrap items-center gap-1 text-sm text-muted;
+  }
+  .crumbs a {
+    @apply text-muted no-underline hover:text-fg;
+  }
+  form.inline {
+    @apply inline;
+  }
+  .grid.cols-3 {
+    @apply gap-4 md:grid-cols-3;
+  }
+  .grid.cols-3 > div > table {
+    @apply mt-0;
+  }
+  pre.cmd {
+    @apply break-all whitespace-pre-wrap;
+  }
+  pre.codes {
+    @apply my-4 rounded-xl bg-sunken px-4 py-3 text-center text-[15px] font-medium tracking-widest text-fg ring-1 ring-line;
+    columns: 2;
+    column-gap: 1.5rem;
+  }
+  .stat-row {
+    @apply my-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6;
+  }
+  .stat-row .stat {
+    @apply rounded-xl bg-surface p-3 text-xs text-muted shadow-card ring-1 ring-line;
+  }
+  .stat-row .stat strong {
+    @apply block text-xl font-semibold text-fg tabular-nums;
+  }
+  figure.chart {
+    @apply m-0;
+  }
+  .chart-plot {
+    @apply relative h-44 pl-8;
+  }
+  .chart-plot svg {
+    @apply block h-full w-full overflow-visible;
+  }
+  .chart-y {
+    @apply absolute left-0 w-6 -translate-y-1/2 text-right text-[11px] leading-none text-faint tabular-nums;
+  }
+  .chart-y-max {
+    @apply top-0;
+  }
+  .chart-y-mid {
+    @apply top-1/2;
+  }
+  .chart-y-zero {
+    @apply top-full;
+  }
+  .chart-x {
+    @apply mt-2 flex pl-8 text-[11px] text-faint;
+  }
+  .chart-x > span {
+    @apply min-w-0 flex-1 overflow-visible text-center whitespace-nowrap;
+  }
+  figure.chart .bar {
+    fill: var(--accent-2);
+  }
+  figure.chart .bar:hover {
+    fill: var(--accent);
+  }
+  figure.chart .axis {
+    stroke: var(--line-strong);
+    vector-effect: non-scaling-stroke;
+  }
+  figure.chart .grid {
+    stroke: var(--line);
+    stroke-dasharray: 3 4;
+    vector-effect: non-scaling-stroke;
+  }
+  figure.chart figcaption {
+    @apply mt-3 text-xs text-muted;
+  }
+  figure.chart details {
+    @apply mt-2;
+  }
+  figure.chart details table {
+    @apply mt-2;
+  }
+  ul.rank {
+    @apply m-0 list-none space-y-3 p-0;
+  }
+  ul.rank > li {
+    @apply m-0 grid grid-cols-[1fr_auto] items-baseline gap-x-3 text-sm;
+  }
+  .rank-label {
+    @apply truncate text-fg-2;
+  }
+  .rank-n {
+    @apply font-medium text-fg tabular-nums;
+  }
+  .rank-bar {
+    @apply col-span-2 mt-1 block h-1 w-full overflow-hidden rounded-full;
+  }
+  .rank-track {
+    fill: var(--sunken);
+  }
+  .rank-fill {
+    fill: var(--accent-2);
+  }
+  a.wikilink.unresolved {
+    color: var(--warn);
+    text-decoration-style: dashed;
+  }
+  /* Per-note history diff (round3.ts renderDiff): split table on wide screens, unified below. */
+  .diff-split {
+    @apply overflow-hidden rounded-xl bg-surface shadow-card ring-1 ring-line max-lg:hidden;
+  }
+  table.diff {
+    @apply m-0 table w-full table-fixed rounded-none font-mono text-[12.5px] leading-5 shadow-none ring-0;
+  }
+  table.diff th {
+    @apply font-sans;
+  }
+  table.diff td {
+    @apply border-0 px-2 py-0 align-top break-words whitespace-pre-wrap;
+  }
+  table.diff td.ln {
+    @apply w-10 bg-sunken text-right text-faint select-none;
+  }
+  table.diff td.del,
+  pre.diff-unified .del {
+    @apply bg-danger-soft;
+  }
+  table.diff td.add,
+  pre.diff-unified .add {
+    @apply bg-ok-soft;
+  }
+  table.diff tr.gap td,
+  pre.diff-unified .gap {
+    @apply bg-sunken py-1 text-center text-faint;
+  }
+  pre.diff-unified {
+    @apply m-0 bg-surface p-0 py-2 text-[12.5px] whitespace-pre-wrap shadow-card lg:hidden;
+  }
+  pre.diff-unified > div {
+    @apply px-3 break-words;
+  }
+}
+
+/* Recovery-code chips (pre.codes is filled by passkey.js, one code per line). */
+pre.codes {
+  white-space: pre;
+  line-height: 2.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
