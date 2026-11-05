@@ -3203,18 +3203,6 @@ export class VaultDO extends DurableObject<Env> {
   }
 
   /** Create the conventional index note if it doesn't exist. */
-  async ensureIndex(ref: VaultRef, caller: Caller): Promise<Result<{ created: boolean; note: NoteInfo }>> {
-    this.bind(ref);
-    const existing = this.sql.exec<NoteRow>("SELECT * FROM notes WHERE permalink = ?", INDEX_PERMALINK).toArray()[0];
-    if (existing) return ok({ created: false, note: rowToInfo(existing) });
-    const markdown = composeMarkdown(
-      { title: "index", type: "index" },
-      "# Core memory index\n\nOne line per important note: what it is and why it matters. Keep this short; it is loaded at the start of every session.\n\n",
-    );
-    const r = await this.persist({ existing: null, markdown, folder: "memory", fallbackTitle: "index", caller, permalinkOverride: INDEX_PERMALINK });
-    return r.ok ? ok({ created: true, note: rowToInfo(r.value.row) }) : r;
-  }
-
   // ---------- round 3a: supersession ----------
 
   async supersede(

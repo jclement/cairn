@@ -157,7 +157,7 @@ also registers the bm_* names) on Cloudflare, multi-user, with these differences
   are attachments: attach_file stores them and read_note lists their URLs), build_context note bodies
   (read chosen notes with read_note).
 - Search: hybrid keyword + semantic fused by RRF and re-ranked by a small AI judge, which also
-  says when nothing matches ("No strong match").
+  says when nothing matches ("No note answers this directly").
 - Limits: 1 MB a note, 50 MB an account (history included), 60 writes a minute.
 `,
   },

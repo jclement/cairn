@@ -2,12 +2,13 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import type { WebAuthnVerifier } from "../src/auth/webauthn";
-import { createInvite, createPat, getUser, getUserByName, listInvites } from "../src/directory";
+import { createInvite, createPat, createVault, getUser, getUserByName, listInvites } from "../src/directory";
 import * as Q from "../src/jev/questions";
+import { mergeRerank } from "../src/mcp/server";
 import { createApp } from "../src/web/app";
 import { buckets } from "../src/web/round2";
 import { caller, defaultVault, makeUser, ORIGIN } from "./helpers";
-import { callTool, fetchWorker } from "./oauth";
+import { callTool, fetchWorker, mcp } from "./oauth";
 
 const aiRows = async (userId: string) =>
   (
@@ -54,7 +55,47 @@ describe("Jev search re-ranking", () => {
     expect(r.value.rerank).toMatchObject({ applied: true, any_match_band: "no" });
     const pat = await createPat(env, user.id, "t", ["memory:read"], null);
     const text = (await callTool(pat, "search_notes", { query: "zq" })).content[0].text;
-    expect(text).toMatch(/^No strong match — consider rephrasing/);
+    expect(text).toMatch(/^No note answers this directly\./);
+  });
+
+  it("keeps the 'nothing answers' verdict across projects (all_projects), and says results are excerpts", async () => {
+    const { user } = await makeUser();
+    const v = await defaultVault(user.id);
+    for (const t of ["zqa", "zqb", "zqc"]) await v.stub.writeNote(v.ref, caller(user), { title: t, content: `${t} filler` });
+    const second = await createVault(env, user.id, "second");
+    if (!second.ok) throw new Error(second.message);
+    const s2 = { stub: env.VAULT.getByName(second.vault.id), ref: { id: second.vault.id, name: second.vault.name, ownerId: user.id } };
+    for (const t of ["zqd", "zqe", "zqf"]) await s2.stub.writeNote(s2.ref, caller(user), { title: t, content: `${t} filler` });
+    const pat = await createPat(env, user.id, "t", ["memory:read"], null);
+    const all = (await callTool(pat, "search_notes", { query: "zq", all_projects: true })).content[0].text;
+    expect(all).toMatch(/^No note answers this directly\./);
+    expect(all).toContain("Don't guess");
+    const both = (await callTool(pat, "search_notes", { query: "zq", projects: ["main", "second"] })).content[0].text;
+    expect(both).toMatch(/^No note answers this directly\./);
+    // A project whose results do answer wins: no abstention header then.
+    await s2.stub.writeNote(s2.ref, caller(user), { title: "Roof work", content: "roof work quote from the roofer" });
+    for (const t of ["roof a", "roof b"]) await s2.stub.writeNote(s2.ref, caller(user), { title: t, content: "roof work notes" });
+    const ans = (await callTool(pat, "search_notes", { query: "roof work", all_projects: true })).content[0].text;
+    expect(ans).not.toMatch(/^No note answers/);
+    expect(ans).toContain("These are excerpts. Read the relevant notes with read_note");
+    // The contract is in the server instructions.
+    const init = await mcp(pat, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } });
+    expect(init.result.instructions).toContain("don't offer a best guess");
+    expect(init.result.instructions).toContain("before concluding the notes don't cover something");
+  });
+
+  it("mergeRerank: the most positive band among projects", () => {
+    expect(
+      mergeRerank([
+        { applied: true, any_match: 0.1, any_match_band: "no" },
+        { applied: true, any_match: 0.9, any_match_band: "yes" },
+      ]),
+    ).toEqual({
+      applied: true,
+      any_match: 0.9,
+      any_match_band: "yes",
+    });
+    expect(mergeRerank([{ applied: false, error: "down" }])).toEqual({ applied: false, error: "down" });
   });
 
   it("skips Jev for fewer than 3 candidates", async () => {

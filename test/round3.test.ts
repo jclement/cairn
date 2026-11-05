@@ -61,18 +61,23 @@ describe("temporal grammar and supersession (pure)", () => {
 });
 
 describe("core memory", () => {
-  it("core_memory creates the index, includes pinned notes, and warns over budget", async () => {
+  it("core_memory includes pinned notes, says when there is no index (never creates it), and warns over budget", async () => {
     const { user } = await makeUser();
     const v = await defaultVault(user.id);
     const pat = await createPat(env, user.id, "t", ["memory:read", "memory:write"], null);
     await v.stub.writeNote(v.ref, caller(user), { title: "Prefs", content: "- [style] Short answers", metadata: { pinned: true } });
     await v.stub.writeNote(v.ref, caller(user), { title: "Unpinned", content: "nope" });
     const t = (await callTool(pat, "core_memory", {})).content[0].text;
-    expect(t).toContain("## Core memory index (memory/index)");
+    expect(t).toContain('no index note yet: to start one, write_note with identifier="memory/index"');
     expect(t).toContain("## Pinned: Prefs (prefs)\n- [style] Short answers");
     expect(t).not.toContain("nope");
     expect(t).toMatch(/core memory for main: [\d.]+ KB of a 8.0 KB budget; 1 pinned note/);
-    expect((await v.stub.readNote(v.ref, { identifier: "memory/index" })).ok).toBe(true);
+    expect((await v.stub.readNote(v.ref, { identifier: "memory/index" })).ok).toBe(false);
+    // Once the user writes one, it leads core memory.
+    await v.stub.writeNote(v.ref, caller(user), { identifier: "memory/index", title: "index", content: "- [[Prefs]] — how I like answers" });
+    const withIndex = (await callTool(pat, "core_memory", {})).content[0].text;
+    expect(withIndex).toContain("## Core memory index (memory/index)");
+    expect(withIndex).not.toContain("no index note yet");
     await env.DB.prepare("UPDATE users SET core_budget = 400 WHERE id = ?").bind(user.id).run();
     await v.stub.writeNote(v.ref, caller(user), { title: "Big", content: "x\n".repeat(600), metadata: { pinned: true } });
     const over = (await callTool(pat, "core_memory", {})).content[0].text;

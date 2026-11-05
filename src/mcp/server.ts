@@ -15,7 +15,7 @@ import { registerCaptureTools } from "../capture/mcp";
 import { createVault, getVault, listVaults, type Vault, vaultRef, vaultStub } from "../directory";
 import { type Caller, DEFAULT_CORE_BUDGET, type Env, SCOPE_WRITE, VERSION } from "../env";
 import { diffText, inferText, validateText, validationCounts } from "../schema/picoschema";
-import { admitWrite, admitWrites } from "../stats/limits";
+import { admitWrites } from "../stats/limits";
 import { bump } from "../stats/record";
 import { FOLDER_OP_MAX, type NoteInfo, type SearchHit, type SearchResult, type WriteHints } from "../vault/do";
 import { filtersProblem } from "../vault/filters";
@@ -32,6 +32,7 @@ export interface McpIdentity {
 
 export const INSTRUCTIONS = `Cairn is the user's long-term memory: markdown notes in projects (default project: the user's default, usually "main"). help documents every tool.
 Notes use Basic Memory's format: YAML frontmatter (title, type, tags), observations as "- [category] fact #tag (context)", relations as "- relation_type [[Other Note]]", and inline [[Wiki Links]]. Links to notes that don't exist yet are fine.
+Answering from notes: answer only from what the notes state. If the notes don't state it, say so plainly and stop: don't offer a best guess, a "most likely" option or an inference from nearby facts. Search results are excerpts: read the relevant notes (read_note) before answering a detailed or multi-part question, and before concluding the notes don't cover something. For a question with several parts, make sure each part is answered from a note, or say which part the notes don't cover.
 Workflow: search_notes before writing (avoid duplicates; search again with what you learn), read_note to open a note, write_note to create, edit_note for partial changes (pass expected_checksum from your last read to avoid clobbering), build_context to walk links from a note.
 Every successful write returns a receipt "saved <project>/<permalink> rev <rev> at <time> — <url>". Quote it to the user. If you have no receipt, nothing was saved.
 Start of a session: call core_memory to load the user's core memory (their index note and pinned notes).
@@ -403,7 +404,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
     "search_notes",
     {
       description:
-        'Search notes, ranked: hybrid (keyword + semantic, fused, AI re-ranked) by default. query supports "phrases", AND/OR/NOT and tag:x, and is optional: omit it to search by filters alone. Narrow with filters (frontmatter), note_types, categories, tags, since, path, or the valid-time filters (valid_at, valid_overlaps, time_kind over @-qualifiers). items returns notes, observations or relations. lines returns matching lines with context, like grep; identifier searches one note. Scope: project (default), projects, or all_projects. Results are compact; read full notes with read_note.',
+        'Search notes, ranked: hybrid (keyword + semantic, fused, AI re-ranked) by default. query supports "phrases", AND/OR/NOT and tag:x, and is optional: omit it to search by filters alone. Narrow with filters (frontmatter), note_types, categories, tags, since, path, or the valid-time filters (valid_at, valid_overlaps, time_kind over @-qualifiers). items returns notes, observations or relations. lines returns matching lines with context, like grep; identifier searches one note. Scope: project (default), projects, or all_projects. Results are excerpts: read the relevant notes with read_note before answering in detail or concluding something is not written. A header says when no result answers the query; then the notes do not say, so do not guess.',
       inputSchema: strict("search_notes", {
         query: z.string().optional().describe("What to search for. Omit to search by filters alone."),
         mode: z.enum(["hybrid", "text", "semantic", "title", "permalink"]).optional(),
@@ -486,6 +487,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
         let total = 0;
         const modes = new Set<string>();
         const notes: string[] = [];
+        const reranks: NonNullable<SearchResult["rerank"]>[] = [];
         for (const t of targets) {
           // Each project's first page*page_size results: enough for the merged page to be exact.
           const { page: _pg, page_size: _ps, ...one } = rest;
@@ -495,6 +497,8 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
           total += r.value.total;
           for (const m of r.value.modes_used) modes.add(m);
           for (const n of r.value.notes ?? []) notes.push(`${t.name}: ${n}`);
+          // Only a project with hits has a say in whether anything answers the query.
+          if (r.value.rerank && r.value.hits.length) reranks.push(r.value.rerank);
         }
         all.sort((a, b) => b.score - a.score);
         result = {
@@ -505,6 +509,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
           has_more: total > page * pageSize,
           modes_used: [...modes],
           ...(notes.length ? { notes } : {}),
+          ...(reranks.length ? { rerank: mergeRerank(reranks) } : {}),
         };
       }
       const label = targets.length === 1 ? targets[0].name : targets.map((t) => t.name).join(", ");
@@ -542,9 +547,13 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
       const multi = targets.length > 1;
       const out = hits.map((h, i) => formatHit(h, (page - 1) * pageSize + i + 1, !!compact, multi));
       out.push(`— ${total} result(s), page ${page}${has_more ? `; more: search_notes with page=${page + 1}` : ""} [${modes_used.join("+")}]`);
+      if (!compact && !args.identifier)
+        out.push(
+          "(These are excerpts. Read the relevant notes with read_note before answering a detailed or multi-part question, and before concluding the notes don't cover something.)",
+        );
       if (rerank?.applied && rerank.any_match_band === "no") {
         out.unshift(
-          "No strong match — consider rephrasing. (None of these results seems to answer the query; say you don't know if a rephrased search finds nothing.)",
+          "No note answers this directly. (None of these results seems to answer the query. Rephrase once if you like; if nothing states the answer, say the notes don't say. Don't guess which result is most likely.)",
         );
       } else if (rerank?.applied && rerank.any_match_band === "unsure") {
         out.unshift("Weak match — the results may not answer the query; check them before relying on them.");
@@ -824,20 +833,21 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
     const v = await vaultFor(project);
     if (isRefusal(v)) return v;
     const stub = vaultStub(env, v);
-    // Create the index on first use, which is a write: only when missing, writable and admitted.
-    let indexNote = "";
-    const probe = await stub.coreMemory(vaultRef(v), 0);
-    if (!probe.index && canWrite) {
-      if (await admitWrite(env, who.userId)) await stub.ensureIndex(vaultRef(v), caller("core_memory"));
-      else indexNote = "(memory/index not created this time: too many writes in the last minute)";
-    }
+    // A read: never creates or changes anything (not even the index note).
     const budget =
       (await env.DB.prepare("SELECT core_budget FROM users WHERE id = ?").bind(who.userId).first<{ core_budget: number }>())?.core_budget ??
       DEFAULT_CORE_BUDGET;
     const c = await stub.coreMemory(vaultRef(v), budget);
     const kb = (n: number) => `${(n / 1024).toFixed(1)} KB`;
-    if (indexNote) c.text = c.text ? `${c.text}\n\n${indexNote}` : indexNote;
-    const lines = [c.text || "(core memory is empty: add one line per important note to memory/index, or pin notes with `pinned: true`)", ""];
+    const howTo = 'write_note with identifier="memory/index" and one line per important note, e.g. "- [[Acme Corp]] — biggest customer"';
+    const lines = [
+      c.text
+        ? c.index
+          ? c.text
+          : `${c.text}\n\n(no index note yet: to start one, ${howTo})`
+        : `(core memory is empty: no index note and no pinned notes. To start one, ${howTo}; or pin notes with \`pinned: true\`)`,
+      "",
+    ];
     lines.push(`— core memory for ${v.name}: ${kb(c.fullBytes)} of a ${kb(c.budget)} budget; ${c.pinned.length} pinned note(s)`);
     if (c.truncated) {
       lines.push(
@@ -851,9 +861,9 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
     "core_memory",
     {
       description:
-        "Cairn: load core memory: the project's index note (memory/index, created on first use) and every pinned note (frontmatter pinned: true), within the user's byte budget. Call at the start of a session.",
+        "Cairn: load core memory: the project's index note (memory/index) and every pinned note (frontmatter pinned: true), within the user's byte budget. Call at the start of a session. Read-only: if there is no index note yet it says so; create one with write_note.",
       inputSchema: strict("core_memory", { project: projectParam }),
-      annotations: { readOnlyHint: false },
+      annotations: { readOnlyHint: true },
     },
     async (args) => coreText(args.project),
   );
@@ -1051,6 +1061,17 @@ function hintLines(hints: WriteHints | undefined): string[] {
   }
   if (hints.skipped) out.push(`(${hints.skipped})`);
   return out;
+}
+
+/** One verdict for a search across projects: the most positive band among projects that had hits. */
+export function mergeRerank(rs: NonNullable<SearchResult["rerank"]>[]): NonNullable<SearchResult["rerank"]> {
+  const applied = rs.filter((r) => r.applied);
+  if (!applied.length) return rs[0];
+  const order = { yes: 2, unsure: 1, no: 0 } as const;
+  const banded = applied.filter((r) => r.any_match_band);
+  if (!banded.length) return { applied: true };
+  const best = banded.reduce((a, b) => (order[b.any_match_band ?? "no"] > order[a.any_match_band ?? "no"] ? b : a));
+  return { applied: true, any_match: best.any_match, any_match_band: best.any_match_band };
 }
 
 function formatHit(h: SearchHit & { project: string }, n: number, compact: boolean, multi: boolean): string {

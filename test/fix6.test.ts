@@ -101,26 +101,37 @@ describe("2: the new mutation paths take the shared write limiter", () => {
     expect((await contents()).every((c) => c?.includes("0"))).toBe(true);
   });
 
-  it("core_memory doesn't create the index when the limiter says no, but still returns core memory", async () => {
+  it("core_memory is a pure read: a writable connection calling it twice changes nothing", async () => {
     const { user } = await makeUser();
     const pat = await createPat(env, user.id, "t", ["memory:read", "memory:write"], null);
-    const res = await worker.fetch(
-      new Request(`${BASE}/mcp`, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${pat}`,
-          host: "localhost:8787",
-          "content-type": "application/json",
-          accept: "application/json, text/event-stream",
-          "mcp-protocol-version": "2025-06-18",
-        },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "core_memory", arguments: {} } }),
-      }),
-      { ...env, RL_WRITE: deny } as typeof env,
-      createExecutionContext(),
-    );
-    expect(await res.text()).toContain("memory/index not created this time");
     const v = await defaultVault(user.id);
+    const state = () =>
+      runInDurableObject(v.stub, (_i, st) =>
+        JSON.stringify(st.storage.sql.exec("SELECT (SELECT COUNT(*) FROM notes) AS n, (SELECT COUNT(*) FROM revisions) AS r").toArray()),
+      );
+    const before = await state();
+    const bytes = async () => (await env.DB.prepare("SELECT bytes_used FROM users WHERE id = ?").bind(user.id).first<{ bytes_used: number }>())?.bytes_used;
+    const b0 = await bytes();
+    for (let i = 0; i < 2; i++) {
+      const res = await worker.fetch(
+        new Request(`${BASE}/mcp`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${pat}`,
+            host: "localhost:8787",
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "mcp-protocol-version": "2025-06-18",
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "core_memory", arguments: {} } }),
+        }),
+        env,
+        createExecutionContext(),
+      );
+      expect(await res.text()).toContain("no index note");
+    }
+    expect(await state()).toBe(before);
+    expect(await bytes()).toBe(b0);
     expect((await v.stub.readNote(v.ref, { identifier: "memory/index" })).ok).toBe(false);
   });
 });
