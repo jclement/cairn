@@ -742,9 +742,7 @@ async function bTarget(s: Seed, cookie: string): Promise<Target> {
   const grants = (await env.OAUTH_KV.list({ prefix: `grant:${s.b.user.id}:` })).keys.map((k) => k.name.split(":")[2]);
   // B's import admission (2 in progress): earlier controls' jobs may still be running on a slow
   // machine, so close them out first, as for invites above.
-  await env.DB.prepare(
-    "UPDATE import_jobs SET status = 'failed', finished_at = ? WHERE user_id = ? AND status IN ('staging', 'running')",
-  )
+  await env.DB.prepare("UPDATE import_jobs SET status = 'failed', finished_at = ? WHERE user_id = ? AND status IN ('staging', 'running')")
     .bind(new Date().toISOString(), s.b.user.id)
     .run();
   await env.DB.prepare("DELETE FROM import_daily WHERE user_id = ?").bind(s.b.user.id).run();
