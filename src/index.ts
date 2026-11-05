@@ -118,12 +118,32 @@ export async function rateLimit(request: Request, env: Env): Promise<Response | 
 // The provider's options depend on env (PUBLIC_URL), so build it per isolate on first request.
 let cached: { url: string; provider: OAuthProvider<Env> } | null = null;
 
+/** For responses that set no policy of their own (JSON errors, OAuth endpoints, MCP): nothing may load. */
+export const API_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'";
+
+/**
+ * Every response leaves with the baseline security headers: the web app sets its own (and its
+ * pages' CSP is kept); the OAuth provider's endpoints, MCP and rate-limit answers get them here.
+ */
+export function withSecurityHeaders(res: Response): Response {
+  if (res.status === 101 || (res as Response & { webSocket?: unknown }).webSocket) return res;
+  const out = new Response(res.body, res);
+  const set = (k: string, v: string) => {
+    if (!out.headers.has(k)) out.headers.set(k, v);
+  };
+  out.headers.set("X-Content-Type-Options", "nosniff");
+  set("Referrer-Policy", "same-origin");
+  set("X-Frame-Options", "DENY");
+  set("Content-Security-Policy", API_CSP);
+  return out;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const limited = await rateLimit(request, env);
-    if (limited) return limited;
+    if (limited) return withSecurityHeaders(limited);
     if (!cached || cached.url !== env.PUBLIC_URL) cached = { url: env.PUBLIC_URL, provider: new OAuthProvider<Env>(providerOptions(env)) };
-    return cached.provider.fetch(request, env, ctx);
+    return withSecurityHeaders(await cached.provider.fetch(request, env, ctx));
   },
   /** Cloudflare Email Routing: mail to INBOUND_EMAIL_ADDRESS becomes notes (src/capture/email.ts). */
   async email(message: ForwardableEmailMessage, env: Env): Promise<void> {

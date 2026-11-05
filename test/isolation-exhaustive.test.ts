@@ -80,9 +80,14 @@ async function seed() {
   };
   const main = await w(am, {
     title: `Main ${c("maintitle")}`,
-    content: `${c("mainbody")}\n\n- [fact] ${c("mainobs")}\n- relates_to [[Pinned ${c("pintitle")}]]`,
+    content: `${c("mainbody")} ${c("mainsealed")}\n\n- [fact] ${c("mainobs")}\n- relates_to [[Pinned ${c("pintitle")}]]`,
   });
-  await w(am, { identifier: main.permalink, title: main.title, overwrite: true, content: `${c("mainbody")} ${c("revbody")}\n\n- [fact] ${c("mainobs")}` });
+  await w(am, {
+    identifier: main.permalink,
+    title: main.title,
+    overwrite: true,
+    content: `${c("mainbody")} ${c("mainsealed")} ${c("revbody")}\n\n- [fact] ${c("mainobs")} ${c("obssealed")}`,
+  });
   await w(am, { title: `Pinned ${c("pintitle")}`, content: `---\npinned: true\n---\n${c("pinbody")}` });
   await w(am, {
     directory: "schemas",
@@ -96,7 +101,11 @@ async function seed() {
   const pv = await createVault(env, a.user.id, projName);
   if (!pv.ok) throw new Error(pv.message);
   const proj = { vault: pv.vault, stub: env.VAULT.getByName(pv.vault.id), ref: { id: pv.vault.id, name: pv.vault.name, ownerId: a.user.id } };
-  const secret = await w(proj, { directory: "deep", title: `Secret ${c("projtitle")}`, content: `${c("projbody")}\n\n- [fact] ${c("projobs")}` });
+  const secret = await w(proj, {
+    directory: "deep",
+    title: `Secret ${c("projtitle")}`,
+    content: `${c("projbody")} ${c("projsealed")}\n\n- [fact] ${c("projobs")} ${c("projobssealed")}`,
+  });
 
   const att = await putAttachment(env, pv.vault as Vault, { bytes: enc(`file ${c("filebytes")}`), name: `${c("filename")}.txt`, source: "upload" });
   if (!att.ok) throw new Error(att.message);
@@ -179,6 +188,7 @@ async function seed() {
       "invitenote",
       "credid",
       "credname",
+      ...SEALED,
     ].map(c),
     projName,
     a.user.username,
@@ -420,6 +430,15 @@ const toolCase = (name: string) => TOOLS[name] ?? TOOLS[BM_NAMES[name] ?? ""];
  * has sent one, it is no longer counted for B. Every other canary (bodies, observations, file
  * bytes, tokens, ids, A's username) stays strict for the whole run.
  */
+/**
+ * Canaries that sit on the same lines as the ones requests carry (A's searched body text, A's
+ * observation) but are never sent in any request. A request's own values may be echoed back (a
+ * search page repeats its query), so a canary the request carried is not counted for that request;
+ * these sealed ones close that gap: a result row or excerpt that leaks the line leaks them too, and
+ * they can never be an echo.
+ */
+const SEALED = ["mainsealed", "obssealed", "projsealed", "projobssealed"];
+
 const taintedByB = new Set<string>();
 function taintable(s: Seed): string[] {
   return [s.projName, c("maintitle"), c("projtitle"), c("pintitle")];
@@ -428,6 +447,8 @@ function noteSentByB(s: Seed, request: string) {
   for (const x of taintable(s)) if (request.includes(x)) taintedByB.add(x);
 }
 function leaks(s: Seed, res: Sent, request: string, allow: string[] = [], byB = false): string[] {
+  const sealed = SEALED.map(c);
+  if (sealed.some((x) => request.includes(x))) throw new Error("test bug: a request carried a sealed canary");
   const seen = `${res.text}\n${[...res.headers.entries()].map(([k, v]) => `${k}: ${v}`).join("\n")}`;
   return s.canaries.filter((x) => seen.includes(x) && !request.includes(x) && !allow.includes(x) && !(byB && taintedByB.has(x)));
 }
