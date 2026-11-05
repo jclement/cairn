@@ -1,5 +1,7 @@
 # Cairn
 
+![A note in Cairn: typed observations, relations, backlinks and a local graph, in the dark theme](docs/screenshots/note-observations-relations.png)
+
 Cairn is long-term memory for AI assistants that you run on your own Cloudflare account. Your
 memory is a set of markdown notes with typed observations (`- [decision] …`), relations
 (`- depends_on [[Other note]]`) and tags. Claude and other MCP clients read and write them over
@@ -80,15 +82,45 @@ written for Basic Memory run unchanged.
 
 ## Screenshots
 
-*(To be added:)*
+All data below is an invented demo account on the public instance, deleted after the shots.
 
-1. A note: observations, relations, backlinks and the receipt trail
-2. Search with filters, and the Ctrl/Cmd-K palette
-3. The editor with `[[` completion and live preview
-4. The project graph
-5. Activity: what each connected app changed, with undo
-6. The consent page an assistant sends you to
-7. Settings: connected apps, tokens, invites
+**A note** (also at the top of this page): typed observations, relations, backlinks, a local
+graph and an attached image; the byline names the app that last wrote it. Here, a decision
+note in the light theme.
+![A decision note with reasons, risks and links, light theme](docs/screenshots/note-decision-light.png)
+
+**Search** by keyword and meaning, with project, type, tag, folder and date filters.
+![Search results for "roast" with matching lines highlighted](docs/screenshots/search.png)
+
+**The Ctrl/Cmd-K palette:** jump to a note, search, or start a new one.
+![Command palette open over the home page with "tom" typed](docs/screenshots/command-palette-light.png)
+
+**The editor:** `[[` completes note titles, with a live preview beside it.
+![Note editor showing a [[ link completion popup and the rendered preview](docs/screenshots/editor-link-completion.png)
+
+**The project graph.**
+![Force-directed graph of a project's notes coloured by type](docs/screenshots/graph.png)
+
+**Activity:** every change, with the app that made it (Claude Code, claude.ai) and the tool it used.
+![Activity list of creates and updates by Claude Code and Claude](docs/screenshots/activity.png)
+
+**History and undo:** each revision's diff, and a button to undo it.
+![History of a note with a side-by-side diff and an Undo this change button](docs/screenshots/history-undo.png)
+
+**The consent page** an assistant sends you to when it connects.
+![OAuth consent page asking to allow Claude Code to use your memory](docs/screenshots/oauth-consent-light.png)
+
+**Settings:** connected apps and personal access tokens.
+![Connected apps list with Claude and Claude Code and their scopes](docs/screenshots/settings-connected-apps.png)
+![Personal access tokens with one read-only token and the create form, light theme](docs/screenshots/settings-tokens-light.png)
+
+**Home** and the landing page.
+![Home dashboard with counts, recently updated notes and the memory score](docs/screenshots/home-dashboard.png)
+![Landing page hero: "Your AI forgets everything. Cairn doesn't."](docs/screenshots/landing-hero.png)
+
+**On a phone.**
+
+<img src="docs/screenshots/phone-note.png" width="260" alt="A note on a phone, dark theme"> <img src="docs/screenshots/phone-home-light.png" width="260" alt="Home on a phone, light theme">
 
 ## Deploy your own
 

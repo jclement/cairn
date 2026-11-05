@@ -14,10 +14,11 @@ import { describeAttachments } from "../capture/files";
 import { registerCaptureTools } from "../capture/mcp";
 import { createVault, getVault, listVaults, type Vault, vaultRef, vaultStub } from "../directory";
 import { type Caller, DEFAULT_CORE_BUDGET, type Env, SCOPE_WRITE, VERSION } from "../env";
+import { outlineLine, outlineOf } from "../markdown/outline";
 import { diffText, inferText, validateText, validationCounts } from "../schema/picoschema";
 import { admitWrites } from "../stats/limits";
 import { bump } from "../stats/record";
-import { FOLDER_OP_MAX, type NoteInfo, type SearchHit, type SearchResult, type WriteHints } from "../vault/do";
+import { ANSWER_PACK_HITS, FOLDER_OP_MAX, type NoteInfo, type SearchHit, type SearchResult, type WriteHints } from "../vault/do";
 import { filtersProblem } from "../vault/filters";
 import { parseSince, SINCE_HELP } from "../vault/time";
 import { manPage, manSearch, type ToolDoc } from "./man";
@@ -32,7 +33,7 @@ export interface McpIdentity {
 
 export const INSTRUCTIONS = `Cairn is the user's long-term memory: markdown notes in projects (default project: the user's default, usually "main"). help documents every tool.
 Notes use Basic Memory's format: YAML frontmatter (title, type, tags), observations as "- [category] fact #tag (context)", relations as "- relation_type [[Other Note]]", and inline [[Wiki Links]]. Links to notes that don't exist yet are fine.
-Answering from notes: answer only from what the notes state. If the notes don't state it, say so plainly and stop: don't offer a best guess, a "most likely" option or an inference from nearby facts. Search results are excerpts: read the relevant notes (read_note) before answering a detailed or multi-part question, and before concluding the notes don't cover something. For a question with several parts, make sure each part is answered from a note, or say which part the notes don't cover.
+Answering from notes: answer only from what the notes state. If the notes don't state it, say so plainly and stop: don't offer a best guess, a "most likely" option or an inference from nearby facts. Search results are excerpts: read the relevant notes (read_note) before answering a detailed or multi-part question, and before concluding the notes don't cover something. For a question with several parts, make sure each part is answered from a note, or say which part the notes don't cover. Whole-note reads and the top search results show the note's outline (each section with its number of list items and table rows): before answering, check every listed item you need made it into the answer.
 Workflow: search_notes before writing (avoid duplicates; search again with what you learn), read_note to open a note, write_note to create, edit_note for partial changes (pass expected_checksum from your last read to avoid clobbering), build_context to walk links from a note.
 Every successful write returns a receipt "saved <project>/<permalink> rev <rev> at <time> — <url>". Quote it to the user. If you have no receipt, nothing was saved.
 Start of a session: call core_memory to load the user's core memory (their index note and pinned notes).
@@ -225,6 +226,10 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
       if (!r.ok) return refuse(r.code, r.message);
       const { note, content, total_lines, start_line, end_line, truncated, next_start_line } = r.value;
       const partial = start_line > 1 || end_line < total_lines;
+      // A whole-note read starts with the note's outline (sections with their item counts), so a
+      // summary can check it covered every enumerated part.
+      const outline = content !== null && !partial ? outlineOf(content) : null;
+      const hasOutline = !!outline && outline.entries.length >= 2;
       if (output_format === "json") {
         if (content === null) return json({ project: v.name, ...noteFields(note) });
         return json({
@@ -236,11 +241,13 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
           end_line,
           truncated,
           ...(next_start_line ? { next_start_line } : {}),
+          ...(hasOutline && outline ? { outline: outline.entries } : {}),
           note,
         });
       }
       const head = `# ${note.title}\nproject: ${v.name} | permalink: ${note.permalink} | file_path: ${note.file_path} | type: ${note.type} | checksum: ${note.checksum}\nupdated ${note.updated_at} by ${note.updated_by_client ?? "?"} | lines ${start_line}-${end_line} of ${total_lines}${truncated ? `; next: start_line=${next_start_line}` : ""}`;
       if (content === null) return text(head);
+      const outlineText = hasOutline && outline ? `\noutline: ${outlineLine(outline)}` : "";
       // A partial read returns numbered lines (as Basic Memory); a whole note comes back as stored.
       const body = partial
         ? content
@@ -250,7 +257,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
         : content;
       const files = await describeAttachments(env, v, content, new URL(env.PUBLIC_URL).origin).catch(() => []);
       const tail = files.length ? `\n\nattachments (open the URLs signed in, or ask the user):\n${files.join("\n")}` : "";
-      return text(`${head}\n\n${body}${tail}`);
+      return text(`${head}${outlineText}\n\n${body}${tail}`);
     },
   );
 
@@ -545,7 +552,12 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
         return text(`No matches for ${what} in ${label} (searched: ${modes_used.join("+") || "nothing searchable"}). Try other words, or say you don't know.`);
       }
       const multi = targets.length > 1;
-      const out = hits.map((h, i) => formatHit(h, (page - 1) * pageSize + i + 1, !!compact, multi));
+      // The answer pack (outline, links) only on the first results shown, whichever project they came from.
+      const packed = (h: (typeof hits)[number], rank: number) => (rank <= ANSWER_PACK_HITS ? h : { ...h, outline: undefined, relations: undefined });
+      const out = hits.map((h, i) => {
+        const rank = (page - 1) * pageSize + i + 1;
+        return formatHit(packed(h, rank), rank, !!compact, multi);
+      });
       out.push(`— ${total} result(s), page ${page}${has_more ? `; more: search_notes with page=${page + 1}` : ""} [${modes_used.join("+")}]`);
       if (!compact && !args.identifier)
         out.push(
@@ -1087,6 +1099,8 @@ function formatHit(h: SearchHit & { project: string }, n: number, compact: boole
   if (compact) return lines[0];
   for (const m of h.matches) lines.push(`   ${m.context ? " " : ""}${m.line}${m.context ? "-" : ":"} ${m.text}`);
   for (const o of h.observations) lines.push(`   [${o.category}] ${o.content}${o.context ? ` (${o.context})` : ""}`);
+  if (h.outline) lines.push(`   outline: ${outlineLine(h.outline)}`);
+  if (h.relations?.length) lines.push(`   links: ${h.relations.map((r) => `${r.type} [[${r.target}]]`).join(", ")}`);
   if (h.content) lines.push("   full markdown (as stored, including superseded and expired facts):", "", h.content, "");
   return lines.join("\n");
 }

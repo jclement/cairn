@@ -12,6 +12,7 @@ import { askJev, expectedLevel, jevEnabled, noul } from "../jev/client";
 import { band, conflictQuestion, LIMITS as JEV, type JevQuestion, type NoulBand } from "../jev/questions";
 import { anyMatch, hintRequest, rerankRequest } from "../jev/state";
 import { bmPermalink } from "../markdown/bmslug";
+import { type OutlineEntry, outlineOf } from "../markdown/outline";
 import {
   chunkNote,
   composeMarkdown,
@@ -153,6 +154,9 @@ export const FOLDER_OP_MAX = 500;
 /** Notes read per keyset batch in find / filter-only search, and the most one call scans. */
 const FIND_BATCH = 500;
 export const FIND_SCAN_MAX = 20_000;
+/** Search hits that carry an answer pack (outline + relations), and relations per pack. */
+export const ANSWER_PACK_HITS = 3;
+export const ANSWER_PACK_RELATIONS = 8;
 /** Candidates a filter-only search collects before ranking. */
 export const FILTER_CANDIDATES_MAX = 1000;
 
@@ -301,6 +305,9 @@ export interface SearchHit {
   content?: string;
   /** Jev's expected relevance level 0-3, when the result was re-ranked. */
   relevance?: number;
+  /** Answer pack, top 3 hits of a normal search only: the note's sections with item/row counts, and its relations. */
+  outline?: { entries: OutlineEntry[]; omitted: number };
+  relations?: { type: string; target: string }[];
 }
 
 export interface SearchResult {
@@ -4278,8 +4285,21 @@ export class VaultDO extends DurableObject<Env> {
       });
     }
     const slice = filtered.slice((page - 1) * pageSize, page * pageSize);
-    const hits: SearchHit[] = slice.map(({ row, score }) => {
+    const hits: SearchHit[] = slice.map(({ row, score }, idx) => {
       const matches = matchingLines(row);
+      // Answer pack for the top 3 of a normal search: every section the note enumerates, and its links.
+      const pack = page === 1 && idx < ANSWER_PACK_HITS && args.lines === undefined && !args.identifier;
+      const outline = pack ? outlineOf(row.content) : null;
+      const relations = pack
+        ? this.sql
+            .exec<{ type: string; to_name: string }>(
+              "SELECT type, to_name FROM relations WHERE note_id = ? ORDER BY line LIMIT ?",
+              row.id,
+              ANSWER_PACK_RELATIONS,
+            )
+            .toArray()
+            .map((r) => ({ type: r.type, target: r.to_name }))
+        : [];
       const obsIds = obsHits.get(row.id) ?? [];
       let observations: SearchHit["observations"] = [];
       if (args.detail === "observations" || args.detail === "full") {
@@ -4322,6 +4342,8 @@ export class VaultDO extends DurableObject<Env> {
         observations,
         ...(relevance.has(row.id) ? { relevance: Math.round((relevance.get(row.id) as number) * 100) / 100 } : {}),
         ...(args.detail === "full" ? { content: row.content } : {}),
+        ...(outline && outline.entries.length >= 2 ? { outline } : {}),
+        ...(relations.length ? { relations } : {}),
       };
     });
     await this.count({ op_search: 1 });
