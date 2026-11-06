@@ -57,3 +57,23 @@ export function parseSince(since: string | null | undefined, nowMs = Date.now())
 }
 
 export const SINCE_HELP = "Use e.g. '7d', '24h', '3 days', '2 weeks ago', 'today', 'yesterday', 'last week' or a date (2026-10-01).";
+
+/**
+ * The last day a window may reach, inclusive (YYYY-MM-DD): a date, a month ('2026-09' = through
+ * 2026-09-30) or anything parseSince reads ('yesterday', '2 weeks ago'). null for none, undefined
+ * when it doesn't read as one.
+ */
+export function parseUntil(until: string | null | undefined, nowMs = Date.now()): string | null | undefined {
+  if (until === undefined || until === null || !until.trim()) return null;
+  const s = until.trim();
+  const month = /^(\d{4})-(\d{2})$/.exec(s);
+  if (month) {
+    const m = Number(month[2]);
+    if (m < 1 || m > 12) return undefined;
+    return new Date(Date.UTC(Number(month[1]), m, 0)).toISOString().slice(0, 10);
+  }
+  const at = parseSince(s, nowMs);
+  return at ? at.slice(0, 10) : at;
+}
+
+export const UNTIL_HELP = "Use a date (2026-09-30), a month (2026-09 = through its last day) or e.g. '2 weeks ago'.";

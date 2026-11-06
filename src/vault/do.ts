@@ -68,7 +68,8 @@ import {
 } from "./embed";
 import { compileFilters, type Filters, getPath as getFrontmatterPath, globMatcher } from "./filters";
 import { ftsQuery } from "./fts";
-import { parseSince as readSince } from "./time";
+import { dateLabel, inWindow } from "./notedate";
+import { parseUntil, parseSince as readSince } from "./time";
 
 export type ErrorCode = "NOT_FOUND" | "ALREADY_EXISTS" | "REVISION_CONFLICT" | "INVALID" | "TOO_LARGE" | "FORBIDDEN" | "QUOTA" | "UNAVAILABLE" | "RATE_LIMITED";
 
@@ -288,6 +289,8 @@ export interface SearchArgs {
   tags?: string[];
   path?: string;
   since?: string;
+  /** Through this day (inclusive), by the note's own date; notes without one are kept. */
+  until?: string;
   page?: number;
   page_size?: number;
   detail?: "summary" | "observations" | "full";
@@ -308,6 +311,8 @@ export interface SearchHit {
   score: number;
   updated_at: string;
   updated_by_client: string | null;
+  /** The note's own date and a later edit, e.g. "dated 2026-07-15, edited 2026-11-05" (empty: neither known). */
+  when?: string;
   /** Matching lines; with `lines`, context lines too (context: true). */
   matches: { line: number; text: string; context?: boolean }[];
   observations: { category: string; content: string; context: string | null }[];
@@ -479,6 +484,18 @@ function rowToInfo(r: NoteRow): NoteInfo {
     updated_by_user: r.updated_by_user,
     pinned: !!r.pinned,
   };
+}
+
+/** whenOf for a result row that was scanned without its frontmatter. */
+function whenOfPermalink(sql: SqlStorage, permalink: string): { when?: string } {
+  const row = sql.exec<NoteRow>("SELECT title, permalink, frontmatter, created_at, updated_at FROM notes WHERE permalink = ?", permalink).toArray()[0];
+  return row ? whenOf(row) : {};
+}
+
+/** A result's date phrase ("dated 2026-07-15, edited 2026-11-05"), omitted when there is none. */
+function whenOf(row: NoteRow): { when?: string } {
+  const w = dateLabel(row);
+  return w ? { when: w } : {};
 }
 
 /** An edit-time window as an ISO instant; the tools refuse windows that don't parse, so none reach here. */
@@ -2118,7 +2135,7 @@ export class VaultDO extends DurableObject<Env> {
   ): Promise<
     Result<{
       /** fields_json: the requested frontmatter fields, JSON-encoded (any YAML value). */
-      results: { title: string; permalink: string; file_path: string; type: string; updated_at: string; fields_json?: string }[];
+      results: { title: string; permalink: string; file_path: string; type: string; updated_at: string; when?: string; fields_json?: string }[];
       total: number;
       total_is_exact: boolean;
       scanned: number;
@@ -2180,6 +2197,7 @@ export class VaultDO extends DurableObject<Env> {
           file_path: r.file_path,
           type: r.type,
           updated_at: r.updated_at,
+          ...whenOfPermalink(this.sql, r.permalink),
           ...(args.fields?.length ? { fields_json: JSON.stringify(Object.fromEntries(args.fields.map((f) => [f, getFrontmatterPath(fm, f) ?? null]))) } : {}),
         };
       }),
@@ -2557,7 +2575,7 @@ export class VaultDO extends DurableObject<Env> {
   ): Promise<{
     path: string;
     folders: { name: string; path: string; notes: number }[];
-    notes: NoteInfo[];
+    notes: (NoteInfo & { when?: string })[];
     total_notes: number;
     page: number;
     has_more: boolean;
@@ -2575,7 +2593,7 @@ export class VaultDO extends DurableObject<Env> {
     // Paged only when asked (the web viewer lists whole folders).
     const pageSize = args.page_size || args.page ? Math.min(Math.max(args.page_size ?? 10, 1), 100) : all.length || 1;
     const page = Math.max(args.page ?? 1, 1);
-    const notes = all.slice((page - 1) * pageSize, page * pageSize).map(rowToInfo);
+    const notes = all.slice((page - 1) * pageSize, page * pageSize).map((r) => ({ ...rowToInfo(r), ...whenOf(r) }));
     const prefix = path ? `${path}/` : "";
     const rows = this.sql
       .exec<{ folder: string; n: number }>(`SELECT folder, COUNT(*) AS n FROM notes WHERE ${UNDER("folder", "?1")} GROUP BY folder`, prefix)
@@ -3895,8 +3913,18 @@ export class VaultDO extends DurableObject<Env> {
     if ("error" in timeFilter) return fail("INVALID", timeFilter.error);
     const cats = args.categories?.map((c) => c.trim().toLowerCase()).filter(Boolean);
     const filterOnly = !query;
-    if (filterOnly && !args.filters && !cats?.length && !args.note_types?.length && !args.tags?.length && !args.since && !args.path && !timeFilter.sql) {
-      return fail("INVALID", "Give a query, or search by filters alone with filters, note_types, categories, tags, since, path or a valid-time filter.");
+    if (
+      filterOnly &&
+      !args.filters &&
+      !cats?.length &&
+      !args.note_types?.length &&
+      !args.tags?.length &&
+      !args.since &&
+      !args.until &&
+      !args.path &&
+      !timeFilter.sql
+    ) {
+      return fail("INVALID", "Give a query, or search by filters alone with filters, note_types, categories, tags, since, until, path or a valid-time filter.");
     }
     // One validity rule for every place search shows facts (ranking, matching lines, detail output,
     // re-ranking state): valid on `validOn` (today, or as_of). Without as_of, superseded facts are
@@ -3910,6 +3938,7 @@ export class VaultDO extends DurableObject<Env> {
     const { expr, tags: queryTags, terms } = ftsQuery(query);
     const tagFilter = [...queryTags, ...(args.tags ?? [])].map((t) => t.toLowerCase());
     const since = parseSince(args.since);
+    const until = parseUntil(args.until) ?? null;
     const path = args.path ? normaliseFolder(args.path) : null;
     const types = args.note_types?.map((t) => normaliseType(t));
     const modesUsed: string[] = [];
@@ -3945,7 +3974,7 @@ export class VaultDO extends DurableObject<Env> {
       if ((cats?.length || timeFilter.sql) && !structObs.has(r.id)) return false;
       if (filterPred && !filterPred(JSON.parse(r.frontmatter || "{}") as Record<string, unknown>)) return false;
       if (types?.length && !types.includes(r.type)) return false;
-      if (since && r.updated_at < since) return false;
+      if (!inWindow(r, since, until)) return false;
       if (path && r.folder !== path && !r.folder.startsWith(`${path}/`)) return false;
       if (tagFilter.length) {
         const tags = (JSON.parse(r.tags) as string[]).map((t) => t.toLowerCase());
@@ -4068,18 +4097,29 @@ export class VaultDO extends DurableObject<Env> {
         let cursor: { at: string; id: number } | null = null;
         let scanned = 0;
         let exhausted = false;
-        type Light = { id: number; type: string; folder: string; updated_at: string; frontmatter: string };
+        type Light = {
+          id: number;
+          type: string;
+          folder: string;
+          title: string;
+          permalink: string;
+          created_at: string;
+          updated_at: string;
+          frontmatter: string;
+        };
         while (ids.length < FILTER_CANDIDATES_MAX && scanned < this.limits.findScanMax) {
           const batch: Light[] = cursor
             ? this.sql
                 .exec<Light>(
-                  `SELECT id, type, folder, updated_at, frontmatter FROM notes WHERE (updated_at < ?1 OR (updated_at = ?1 AND id < ?2)) ORDER BY updated_at DESC, id DESC LIMIT ${FIND_BATCH}`,
+                  `SELECT id, type, folder, title, permalink, created_at, updated_at, frontmatter FROM notes WHERE (updated_at < ?1 OR (updated_at = ?1 AND id < ?2)) ORDER BY updated_at DESC, id DESC LIMIT ${FIND_BATCH}`,
                   cursor.at,
                   cursor.id,
                 )
                 .toArray()
             : this.sql
-                .exec<Light>(`SELECT id, type, folder, updated_at, frontmatter FROM notes ORDER BY updated_at DESC, id DESC LIMIT ${FIND_BATCH}`)
+                .exec<Light>(
+                  `SELECT id, type, folder, title, permalink, created_at, updated_at, frontmatter FROM notes ORDER BY updated_at DESC, id DESC LIMIT ${FIND_BATCH}`,
+                )
                 .toArray();
           let stopped = false;
           for (const r of batch) {
@@ -4091,7 +4131,7 @@ export class VaultDO extends DurableObject<Env> {
             if (only && r.id !== only.id) continue;
             if ((cats?.length || timeFilter.sql) && !structObs.has(r.id)) continue;
             if (types?.length && !types.includes(r.type)) continue;
-            if (since && r.updated_at < since) continue;
+            if (!inWindow(r, since, until)) continue;
             if (path && r.folder !== path && !r.folder.startsWith(`${path}/`)) continue;
             if (filterPred && !filterPred(JSON.parse(r.frontmatter || "{}") as Record<string, unknown>)) continue;
             ids.push(String(r.id));
@@ -4233,6 +4273,7 @@ export class VaultDO extends DurableObject<Env> {
         score: Math.round(score * 10000) / 10000,
         updated_at: row.updated_at,
         updated_by_client: row.updated_by_client,
+        ...whenOf(row),
         matches: [],
         observations: [],
       });
@@ -4347,6 +4388,7 @@ export class VaultDO extends DurableObject<Env> {
         score: Math.round(score * 10000) / 10000,
         updated_at: row.updated_at,
         updated_by_client: row.updated_by_client,
+        ...whenOf(row),
         matches,
         observations,
         ...(relevance.has(row.id) ? { relevance: Math.round((relevance.get(row.id) as number) * 100) / 100 } : {}),
@@ -4378,10 +4420,20 @@ export class VaultDO extends DurableObject<Env> {
         permalink: string;
         type: string;
         updated_at: string;
+        when?: string;
         observations: { category: string; content: string }[];
         relations: { type: string; target: string; resolved: string | null }[];
       }[];
-      related: { title: string; permalink: string; type: string; via: string; direction: "outgoing" | "incoming"; depth: number; updated_at: string }[];
+      related: {
+        title: string;
+        permalink: string;
+        type: string;
+        via: string;
+        direction: "outgoing" | "incoming";
+        depth: number;
+        updated_at: string;
+        when?: string;
+      }[];
       page: number;
       has_more: boolean;
       /** Set when a long pattern stopped after looking at `scanned` notes: matches beyond may exist. */
@@ -4436,6 +4488,7 @@ export class VaultDO extends DurableObject<Env> {
       permalink: r.permalink,
       type: r.type,
       updated_at: r.updated_at,
+      ...whenOf(r),
       observations: this.sql
         .exec<{ category: string; content: string }>("SELECT category, content FROM observations WHERE note_id = ? ORDER BY line LIMIT 30", r.id)
         .toArray(),
@@ -4458,7 +4511,7 @@ export class VaultDO extends DurableObject<Env> {
           const row = this.sql.exec<NoteRow>("SELECT * FROM notes WHERE permalink = ?", t.permalink).toArray()[0];
           if (!row || visited.has(row.id)) continue;
           visited.add(row.id);
-          if (since && row.updated_at < since) continue;
+          if (!inWindow(row, since, null)) continue;
           related.push({
             title: row.title,
             permalink: row.permalink,
@@ -4467,6 +4520,7 @@ export class VaultDO extends DurableObject<Env> {
             direction: "outgoing",
             depth: d,
             updated_at: row.updated_at,
+            ...whenOf(row),
           });
           next.push(row);
         }
@@ -4482,7 +4536,7 @@ export class VaultDO extends DurableObject<Env> {
         for (const row of inc) {
           if (visited.has(row.id)) continue;
           visited.add(row.id);
-          if (since && row.updated_at < since) continue;
+          if (!inWindow(row, since, null)) continue;
           related.push({
             title: row.title,
             permalink: row.permalink,
@@ -4491,6 +4545,7 @@ export class VaultDO extends DurableObject<Env> {
             direction: "incoming",
             depth: d,
             updated_at: row.updated_at,
+            ...whenOf(row),
           });
           next.push(row);
         }
