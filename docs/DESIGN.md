@@ -157,6 +157,21 @@ take is refused by name (`INVALID`), never dropped.
 | `core_memory` | [live] | pinned notes plus the index note, within a byte budget; also the `core_memory` prompt |
 | `supersede` | [live] | move an observation to `## Superseded` with dates and write its replacement |
 | `attach_file` | [main] | store a file from a URL or base64 and embed it |
+| `log_miss` | [main] | record a question the notes didn't answer; `recent_activity items=["miss"]` and `/app/misses` list them |
+
+**Original text [main].** `write_note` / `edit_note` take `source_text` (+ `source_label`): the
+verbatim words a note was written from. Stored in the vault DO's `note_sources` (several per note,
+newest first), not in the body: checksums, edits and supersede never touch it; move keeps it;
+delete removes it. Indexed in its own FTS table and as `source` embedding chunks; a hit there ranks
+after body hits and is labelled "matched in the original text". Secrets are redacted
+(`src/secrets.ts`), each source is cut at 20 KB, and it counts toward the owner's storage quota.
+Export writes `<note>.sources.md` beside the note; import skips those files.
+
+**Misses [main].** D1 `misses` (per user, across projects): every search_notes page 1 with no
+result or the "No note answers this directly" verdict, find_notes with nothing, build_context on
+a missing note, and `log_miss`. Query and filters only (redacted), never note text; repeats within
+10 minutes are one row with a count; 60 new rows per user per hour; 90 days (nightly cron). A
+member's misses in a shared project are theirs, never the owner's.
 
 **Receipts.** Every mutating call returns
 `saved <project>/<permalink> rev <short-checksum> at <time> — <url>`. The skills say: no receipt

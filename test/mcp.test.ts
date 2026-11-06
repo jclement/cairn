@@ -69,6 +69,7 @@ describe("MCP over OAuth", () => {
         "find_notes",
         "list_notes",
         "help",
+        "log_miss",
         "move_note",
         "projects",
         "read_note",

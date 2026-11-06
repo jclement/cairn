@@ -29,6 +29,12 @@ Follow `cairn-notes`: choose the project the user's guidance and the project's g
 project or decision note), use `[category]` observations and `[[links]]`, and `supersede`
 when a fact changes. Batch several facts into one edit when you can.
 
+**Keep the original words.** When a note comes from someone's words (the user's message, a pasted
+email, a meeting snippet), pass those words verbatim as `source_text` on the `write_note` or
+`edit_note` call (and `source_label`, e.g. "Jeff in chat"). The note stays your summary; the
+original is kept beside it, searchable, so a later question the summary dropped can still be
+answered. Never pass secrets in it (they are redacted anyway).
+
 ### Capturing a whole thread
 
 When the user asks to "capture this conversation" (or at the end of a long working session), write

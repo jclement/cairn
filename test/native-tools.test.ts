@@ -6,6 +6,8 @@ import { makeUser } from "./helpers";
 import { mcp, setWorkerEnv } from "./oauth";
 
 const CAIRN = Object.values(BM_NAMES);
+/** Cairn tools with no Basic Memory counterpart (so no bm_* alias). */
+const NATIVE_ONLY = ["recent_activity", "log_miss"];
 
 async function pat() {
   const { user } = await makeUser("native");
@@ -30,7 +32,7 @@ describe("Cairn-native tool names; bm_* aliases only with BM_COMPAT", () => {
       setWorkerEnv(over);
       const token = await pat();
       const names = await toolNames(token);
-      expect(names).toEqual([...CAIRN, "recent_activity"].sort());
+      expect(names).toEqual([...CAIRN, ...NATIVE_ONLY].sort());
       expect(names.some((n) => n.startsWith("bm_"))).toBe(false);
       expect((await call(token, "bm_search", { query: "x" })).isError).toBe(true);
     }
@@ -44,7 +46,7 @@ describe("Cairn-native tool names; bm_* aliases only with BM_COMPAT", () => {
     const r = await mcp(token, "tools/list");
     const tools = r.result.tools as { name: string; description: string; inputSchema: unknown }[];
     const byName = new Map(tools.map((t) => [t.name, t]));
-    expect(tools.length).toBe(CAIRN.length + 1 + Object.keys(BM_NAMES).length);
+    expect(tools.length).toBe(CAIRN.length + NATIVE_ONLY.length + Object.keys(BM_NAMES).length);
     for (const [bm, cairn] of Object.entries(BM_NAMES)) {
       const a = byName.get(bm);
       const c = byName.get(cairn);

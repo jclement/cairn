@@ -33,8 +33,8 @@ these tools:
 
 | Tool | What it does |
 |---|---|
-| `write_note` | Create or replace a note (by path, or title + folder); returns a receipt and write hints |
-| `read_note` | Read by permalink, `memory://` URL, path or title; a section, line range or token budget |
+| `write_note` | Create or replace a note (by path, or title + folder); returns a receipt and write hints. `source_text` keeps the verbatim words it came from beside it (searchable, secrets redacted) |
+| `read_note` | Read by permalink, `memory://` URL, path or title; a section, line range or token budget; `sources=true` adds the kept original text |
 | `edit_note` | Append, prepend, find/replace, replace or insert around a section, set frontmatter; checksum-guarded |
 | `delete_note` | Delete a note, or a folder with `recursive` (the text stays in history) |
 | `move_note` | Move or rename a note or folder; permalinks stay, so links keep resolving |
@@ -42,7 +42,8 @@ these tools:
 | `find_notes` | Recursive find by file-name glob or frontmatter, with the fields you choose |
 | `list_notes` | One folder level |
 | `build_context` | A note and its linked notes in both directions, to a depth you choose |
-| `recent_activity` | What changed lately, and which app changed it |
+| `recent_activity` | What changed lately, and which app changed it; `items=["miss"]` lists the questions your notes didn't answer |
+| `log_miss` | Record a question the notes didn't answer (empty searches are recorded automatically); review them at `/app/misses` |
 | `projects` | List or create projects (up to 20 per person) |
 | `core_memory` | The always-loaded memory: an index note plus every `pinned: true` note, within a byte budget (also a prompt) |
 | `supersede` | Replace a fact without losing it: the old one moves under `## Superseded`, dated |

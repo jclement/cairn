@@ -37,6 +37,7 @@ export async function deleteAccount(env: Env, oauth: Pick<OAuthHelpers, "listUse
     env.DB.prepare("UPDATE vault_members SET added_by = NULL WHERE added_by = ?").bind(userId),
     env.DB.prepare("UPDATE users SET invited_by = NULL WHERE invited_by = ?").bind(userId),
     env.DB.prepare("DELETE FROM stats_daily WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM misses WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM attachments WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM email_seen WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM ai_daily WHERE user_id = ?").bind(userId),

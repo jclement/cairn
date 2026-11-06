@@ -4,6 +4,7 @@
 
 import { sweepAttachments } from "../capture/files";
 import type { Env } from "../env";
+import { pruneMisses } from "../misses";
 import type { VaultRef } from "../vault/do";
 
 const BATCH = 10;
@@ -134,6 +135,8 @@ export async function runNightly(env: Env, now: Date) {
     // Directory rows whose vault no longer exists.
     env.DB.prepare("DELETE FROM import_jobs WHERE status IN ('done', 'aborted') AND vault_id NOT IN (SELECT id FROM vaults)"),
   ]);
+  // Misses: keep 90 days (best effort).
+  const misses = await pruneMisses(env, now.getTime()).catch(() => 0);
   // Health counts: keep 8 days of hourly AI calls (best effort).
   await env.DB.prepare("DELETE FROM ai_hourly WHERE hour < ?")
     .bind(new Date(now.getTime() - 8 * 86400e3).toISOString().slice(0, 13))
@@ -142,6 +145,7 @@ export async function runNightly(env: Env, now: Date) {
 
   return {
     imports: { stuck: stuck.length, aborted: aborted.ok, pruned: forgot.ok },
+    misses_pruned: misses,
     expired: { vaults: expiring.length, ...expired },
     gardened: { vaults: gardenRows.length, ...gardened },
     digests: digests ? { ...digests } : null,
@@ -186,7 +190,13 @@ export async function recordNightly(env: Env, now: Date): Promise<Awaited<Return
     const { results: _e, ...expired } = r.expired;
     const { results: _g, ...gardened } = r.gardened;
     const digests = r.digests ? (({ results: _d, ...rest }) => rest)(r.digests) : null;
-    await finish(counts.failed + counts.unknown ? "errors" : "ok", counts, null, { imports: r.imports, expired, gardened, digests });
+    await finish(counts.failed + counts.unknown ? "errors" : "ok", counts, null, {
+      imports: r.imports,
+      misses_pruned: r.misses_pruned,
+      expired,
+      gardened,
+      digests,
+    });
     return r;
   } catch (e) {
     await finish("failed", { ok: 0, failed: 0, unknown: 0, deferred: 0 }, String((e as Error)?.message ?? e).slice(0, 500), null);

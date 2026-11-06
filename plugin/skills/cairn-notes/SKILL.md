@@ -141,6 +141,13 @@ byte budget. Keep it lean:
 - If `core_memory` says **OVER BUDGET**, condense: shorten index lines, unpin, or summarise a pinned
   note. Tell the user what you changed.
 
+## Keep the original words
+
+When a note is written from someone's words (a message, a pasted email, a meeting snippet), pass
+them verbatim as `source_text` (with `source_label`) on `write_note` / `edit_note`. Your summary
+stays the note; the original is kept beside it and searchable (`read_note sources=true` shows it).
+Never pass secrets.
+
 ## Never
 
 - Store secrets (passwords, tokens, keys, recovery codes) or another person's private data the

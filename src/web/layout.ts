@@ -90,6 +90,7 @@ export function navKey(path: string): string {
   if (path.startsWith("/app/search")) return "search";
   if (path.startsWith("/app/graph")) return "graph";
   if (path.startsWith("/app/activity")) return "activity";
+  if (path.startsWith("/app/misses")) return "misses";
   if (path.startsWith("/app/new")) return "new";
   if (path.startsWith("/app/stats")) return "stats";
   if (path.startsWith("/app/wrapped")) return "wrapped";
@@ -196,6 +197,7 @@ ${ICONS}
     ${item("home", "/app", "Home", "home")}
     ${item("search", `/app/search${pq}`, "Search", "search")}
     ${item("activity", "/app/activity", "Activity", "bolt")}
+    ${item("misses", "/app/misses", "Misses", "search")}
     ${item("graph", `/app/graph${pq}`, "Graph", "graph")}
     ${item("new", `/app/new${pq}`, "New note", "plus")}
     ${item("stats", "/app/stats", "Stats", "chart")}

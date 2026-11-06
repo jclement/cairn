@@ -45,6 +45,7 @@ import {
 } from "../src/directory";
 import worker, { providerOptions } from "../src/index";
 import { BM_NAMES } from "../src/mcp/names";
+import { recordMiss } from "../src/misses";
 import { createApp } from "../src/web/app";
 import wranglerConfig from "../wrangler.jsonc?raw";
 import { BASE, caller, defaultVault, makeUser } from "./helpers";
@@ -117,7 +118,21 @@ async function seed() {
     directory: "deep",
     title: `Secret ${c("projtitle")}`,
     content: `${c("projbody")} ${c("projsealed")}\n\n- [fact] ${c("projobs")} ${c("projobssealed")}`,
+    // The note's kept original text: searchable by A, never by anyone else.
+    source_text: `${c("srcbody")} ${c("srcsealed")}`,
+    source_label: `label ${c("srclabel")}`,
   });
+  // A's own misses (the questions A's notes didn't answer): never B's to see or change.
+  const miss = await recordMiss(env, {
+    userId: a.user.id,
+    vaultId: pv.vault.id,
+    vaultName: projName,
+    query: `where is ${c("missq")} ${c("misssealed")}`,
+    tool: "search_notes",
+    kind: "empty",
+    expected: c("missexpected"),
+  });
+  if (!miss) throw new Error("seed miss failed");
 
   const att = await putAttachment(env, pv.vault as Vault, { bytes: enc(`file ${c("filebytes")}`), name: `${c("filename")}.txt`, source: "upload" });
   if (!att.ok) throw new Error(att.message);
@@ -185,6 +200,7 @@ async function seed() {
     cred: credId,
     grantRead: grantIds[0],
     grantWrite: grantIds[1],
+    miss: String(miss.id),
   };
   // Everything that must never reach B or an anonymous caller.
   const canaries = [
@@ -214,6 +230,10 @@ async function seed() {
       "credname",
       "guidance",
       "guide",
+      "srcbody",
+      "srclabel",
+      "missq",
+      "missexpected",
       ...SEALED,
     ].map(c),
     projName,
@@ -284,6 +304,7 @@ async function snapshot(s: Seed): Promise<string> {
           q("SELECT * FROM notes ORDER BY id"),
           q("SELECT COUNT(*) AS n, MAX(id) AS m FROM revisions"),
           q("SELECT COUNT(*) AS n FROM observations"),
+          q("SELECT * FROM note_sources ORDER BY id"),
           q("SELECT * FROM import_jobs ORDER BY id"),
           q("SELECT job, idx, status, path FROM import_items ORDER BY job, idx"),
         ].join("\n");
@@ -431,6 +452,9 @@ const ROUTES: Record<string, { public?: true; note?: string }> = {
   "POST /app/v/:vault/sharing/leave": {},
   "POST /app/v/:vault/sharing/guide": {},
   "POST /app/settings/guidance": {},
+  "GET /app/misses": {},
+  "POST /app/misses/dismiss": {},
+  "POST /app/misses/clear": {},
 };
 
 /** Endpoints the OAuth provider serves itself (outside the Hono app). */
@@ -458,6 +482,7 @@ const TOOLS: Record<string, { write: "always" | "some" | "never" }> = {
   check_schema: { write: "some" },
   help: { write: "never" },
   attach_file: { write: "always" },
+  log_miss: { write: "never" },
 };
 
 /** A tool's case; a bm_* alias uses its Cairn tool's. */
@@ -478,7 +503,7 @@ const toolCase = (name: string) => TOOLS[name] ?? TOOLS[BM_NAMES[name] ?? ""];
  * these sealed ones close that gap: a result row or excerpt that leaks the line leaks them too, and
  * they can never be an echo.
  */
-const SEALED = ["mainsealed", "obssealed", "projsealed", "projobssealed"];
+const SEALED = ["mainsealed", "obssealed", "projsealed", "projobssealed", "srcsealed", "misssealed"];
 
 const taintedByB = new Set<string>();
 function taintable(s: Seed): string[] {
@@ -589,6 +614,8 @@ type Target = {
   grant: string;
   invite: string;
   job: string;
+  /** A miss of the owner's (misses are per user, not per project). */
+  miss: string;
   bOwnsVaultName: boolean;
 };
 type Built = { url: string; init: RequestInit };
@@ -630,6 +657,19 @@ function controls(s: Seed): Control[] {
   };
   const status = (res: Sent, ...ok: number[]) => (ok.includes(res.status) ? null : `status ${res.status}: ${res.text.slice(0, 160)}`);
   return [
+    {
+      key: "POST /app/misses/dismiss",
+      build: (t, cookie) => ({ url: "/app/misses/dismiss", init: form(cookie, { id: t.miss }) }),
+      effect: async (res, t) => {
+        const row = await env.DB.prepare("SELECT dismissed_at FROM misses WHERE id = ?").bind(Number(t.miss)).first<{ dismissed_at: string | null }>();
+        return status(res, 303) ?? (row?.dismissed_at ? null : "miss not dismissed");
+      },
+    },
+    {
+      key: "GET /app/misses",
+      build: (t, cookie) => ({ url: `/app/misses?project=${encodeURIComponent(t.vault)}`, init: { headers: { cookie } } }),
+      effect: async (res) => status(res, 200) ?? (res.text.includes("control Control") ? null : "B's own miss not listed"),
+    },
     {
       key: "GET /app/v/:vault/n/*",
       build: (t, cookie) => ({ url: `/app/v/${encodeURIComponent(t.vault)}/n/${t.permalink}`, init: { headers: { cookie } } }),
@@ -800,7 +840,16 @@ async function bTarget(s: Seed, cookie: string): Promise<Target> {
   const imp = await send("/app/api/import", await importUpload(cookie, v.vault.name));
   const job = /"job":"([^"]+)"/.exec(imp.text)?.[1] ?? "";
   const revs = await v.stub.revisions(v.ref, w2.value.note.permalink);
+  const miss = await recordMiss(env, {
+    userId: s.b.user.id,
+    vaultId: v.vault.id,
+    vaultName: v.vault.name,
+    query: `control ${title}`,
+    tool: "search_notes",
+    kind: "empty",
+  });
   return {
+    miss: String(miss?.id ?? ""),
     vault: v.vault.name,
     bOwnsVaultName: true,
     rev: revs[0]?.id ?? 0,
@@ -821,7 +870,7 @@ async function aTargets(s: Seed): Promise<Target[]> {
     if (!r.ok) throw new Error(`A's note ${permalink} unreadable`);
     return { checksum: r.value.note.checksum, rev: (await v.stub.revisions(v.ref, permalink))[0]?.id ?? 0 };
   };
-  const common = { att: s.ids.att, pat: s.ids.pat, grant: s.ids.grantWrite, invite: s.ids.invite, job: s.ids.job };
+  const common = { att: s.ids.att, pat: s.ids.pat, grant: s.ids.grantWrite, invite: s.ids.invite, job: s.ids.job, miss: s.ids.miss };
   return [
     { vault: s.projName, bOwnsVaultName: false, permalink: s.secretPermalink, ...(await read(s.proj, s.secretPermalink)), ...common },
     // B has its own "main": these requests reach B's project and must not touch A's.

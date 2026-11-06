@@ -53,7 +53,7 @@ export function registerNotePage(app: Hono<AppEnv>) {
         404,
       );
     }
-    const { note, content, observations, relations, backlinks, links } = r.value;
+    const { note, content, observations, relations, backlinks, links, sources } = r.value;
     const revs = await stub.revisions(vaultRef(v), note.permalink);
     const info: RenderInfo = { mermaid: false, headings: [] };
     const bodyHtml = renderMarkdown(content, { vault: v.name, links }, info);
@@ -86,6 +86,20 @@ export function registerNotePage(app: Hono<AppEnv>) {
               </div>
             </header>
             <div class="note-body prose">${raw(bodyHtml)}</div>
+            ${
+              sources.length
+                ? html`<details class="note-sources mt-8 rounded-2xl bg-sunken p-4 ring-1 ring-line">
+                  <summary class="cursor-pointer text-sm font-semibold text-fg">Original text <span class="count">${String(sources.length)}</span>
+                    <span class="font-normal text-muted">: the words this note was written from, kept as they were</span></summary>
+                  ${sources.map(
+                    (x) => html`<section class="mt-4">
+                      <p class="m-0 mb-1 text-xs text-muted"><time datetime="${x.created_at}">${when(x.created_at)}</time>${x.label ? html` · ${x.label}` : ""}${x.client ? html` · ${clientBadge(x.client)}` : ""}${x.redactions ? html` · ${String(x.redactions)} secret(s) redacted` : ""}</p>
+                      <pre class="m-0 max-h-96 overflow-auto rounded-xl bg-surface p-3 text-sm whitespace-pre-wrap break-words">${x.text}</pre>
+                    </section>`,
+                  )}
+                </details>`
+                : ""
+            }
           </article>
           <div class="note-side" role="complementary" aria-label="About this note">
             ${

@@ -52,6 +52,7 @@ import {
   WORK,
   Work,
 } from "../schema/picoschema";
+import { redactSecrets } from "../secrets";
 import { BUDGET_EXHAUSTED, spendAiBudget } from "../stats/budget";
 import { SYSTEM_CLIENTS } from "../stats/limits";
 import { bump, estimateTokens, recordAi } from "../stats/record";
@@ -173,6 +174,60 @@ export const FILTER_CANDIDATES_MAX = 1000;
 /** Caps on metadata stored in rows that outlive the note (titles, permalinks, provenance). */
 export const CAPS = { title: 300, permalink: 200, client: 100, tool: 40, username: 64, folderBytes: 200, filePathBytes: 1024 };
 
+/** Most bytes one kept original text holds (longer ones are cut, and the receipt says so). */
+export const SOURCE_MAX_BYTES = 20 * 1024;
+/** Most characters of a source label. */
+export const SOURCE_LABEL_MAX = 200;
+/** Most source bytes read_note sources=true returns in one reply (newest first). */
+export const SOURCE_READ_MAX_BYTES = 100 * 1024;
+
+/** A write's source_text made safe to keep: secrets redacted, cut to SOURCE_MAX_BYTES. */
+export function prepareSource(text: string, label?: string): { text: string; label: string | null; redactions: number; kinds: string[]; cut: boolean } {
+  const r = redactSecrets(text.replace(/\r\n/g, "\n"));
+  const l = label?.trim() ? redactSecrets(label.trim().slice(0, SOURCE_LABEL_MAX)) : null;
+  let out = r.text;
+  const enc = new TextEncoder();
+  const all = enc.encode(out);
+  let cut = false;
+  if (all.length > SOURCE_MAX_BYTES) {
+    cut = true;
+    out = new TextDecoder().decode(all.slice(0, SOURCE_MAX_BYTES - 64)).replace(/\uFFFD+$/, "");
+    const nl = out.lastIndexOf("\n");
+    if (nl > out.length - 2048) out = out.slice(0, nl);
+    out = `${out}\n[… cut: the original was ${Math.ceil(all.length / 1024)} KB; Cairn keeps ${SOURCE_MAX_BYTES / 1024} KB]`;
+  }
+  return {
+    text: out,
+    label: l ? l.text : null,
+    redactions: r.count + (l?.count ?? 0),
+    kinds: [...new Set([...r.kinds, ...(l?.kinds ?? [])])],
+    cut,
+  };
+}
+
+/**
+ * A note's kept original texts as one markdown file (the export's `<note>.sources.md`): newest
+ * first, each under a heading with its time and label, its words in a fenced block, exactly as kept.
+ */
+export function sourcesMarkdown(title: string, permalink: string, sources: SourceView[]): string {
+  const out = [
+    "---",
+    `title: ${JSON.stringify(`Original text: ${title}`)}`,
+    "type: cairn-sources",
+    `note: ${JSON.stringify(permalink)}`,
+    "---",
+    "",
+    `The words [[${title.replace(/[[\]]/g, "")}]] was written from, kept verbatim by Cairn (newest first).`,
+    "",
+  ];
+  for (const x of sources) {
+    const longest = Math.max(2, ...[...x.text.matchAll(/`+/g)].map((m) => m[0].length));
+    const fence = "`".repeat(longest + 1);
+    out.push(`## ${x.created_at}${x.label ? ` — ${x.label.replace(/\n/g, " ")}` : ""}`, "", `${fence}text`, x.text, fence, "");
+  }
+  return out.join("\n");
+}
+
 function provenance(caller: Caller) {
   return {
     userId: caller.userId.slice(0, 64),
@@ -221,9 +276,33 @@ export interface WriteHints {
   skipped?: string;
 }
 
+/** One kept original text of a note. */
+export interface SourceView {
+  id: number;
+  label: string | null;
+  text: string;
+  created_at: string;
+  client: string | null;
+  username: string | null;
+  redactions: number;
+  /** True when the original was longer than SOURCE_MAX_BYTES and was cut. */
+  cut: boolean;
+}
+
+/** What happened to a write's source_text. */
+export interface SourceReceipt {
+  kept: boolean;
+  bytes: number;
+  redactions: number;
+  kinds: string[];
+  cut: boolean;
+}
+
 export interface WriteResult {
   note: NoteInfo;
   created: boolean;
+  /** Set when the write carried source_text. */
+  source?: SourceReceipt;
   hints?: WriteHints;
   totalBytes: number;
   noteCount: number;
@@ -241,6 +320,10 @@ export interface WriteArgs {
   metadata?: Record<string, unknown>;
   overwrite?: boolean;
   expected_checksum?: string;
+  /** The verbatim words the note came from; kept beside the note, not in its body. */
+  source_text?: string;
+  /** Where source_text came from, e.g. "Jeff in chat" or "email from Dana". */
+  source_label?: string;
 }
 
 export type EditCommand = "append" | "prepend" | "find_replace" | "replace_section" | "insert_before_section" | "insert_after_section" | "set_metadata";
@@ -257,6 +340,8 @@ export interface EditArgs {
   /** Merged into the frontmatter with any command (null removes a key). */
   metadata?: Record<string, unknown>;
   expected_checksum?: string;
+  source_text?: string;
+  source_label?: string;
 }
 
 export interface SearchArgs {
@@ -322,6 +407,8 @@ export interface SearchHit {
   /** Answer pack, top 3 hits of a normal search only: the note's sections with item/row counts, and its relations. */
   outline?: { entries: OutlineEntry[]; omitted: number };
   relations?: { type: string; target: string }[];
+  /** Set when the query matched the note's kept original text (ranked below body matches). */
+  source_match?: { at: string; label: string | null; line: string | null; only: boolean };
 }
 
 export interface SearchResult {
@@ -351,6 +438,8 @@ export interface NoteView {
   relations: RelationView[];
   backlinks: { title: string; permalink: string; type: string }[];
   links: Record<string, string | null>; // wiki target text -> permalink (null = unresolved)
+  /** The note's kept original texts, newest first. */
+  sources: SourceView[];
 }
 
 type NoteRow = {
@@ -460,6 +549,23 @@ CREATE TABLE IF NOT EXISTS import_items (job TEXT NOT NULL, idx INTEGER NOT NULL
 CREATE TABLE IF NOT EXISTS import_close (job TEXT PRIMARY KEY, status TEXT NOT NULL);
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(title, content, tags, tokenize = 'porter unicode61 remove_diacritics 2');
 CREATE VIRTUAL TABLE IF NOT EXISTS obs_fts USING fts5(category, content, tags, tokenize = 'porter unicode61 remove_diacritics 2');
+-- A note's original words (what someone said, a pasted email), kept verbatim beside the note body
+-- (which an agent may have summarised). Newest first by id; deleted with the note; charged to quota.
+CREATE TABLE IF NOT EXISTS note_sources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  note_id INTEGER NOT NULL,
+  label TEXT,
+  text TEXT NOT NULL,
+  bytes INTEGER NOT NULL,
+  redactions INTEGER NOT NULL DEFAULT 0,
+  cut INTEGER NOT NULL DEFAULT 0,
+  user_id TEXT,
+  username TEXT,
+  client TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sources_note ON note_sources(note_id);
+CREATE VIRTUAL TABLE IF NOT EXISTS sources_fts USING fts5(text, tokenize = 'porter unicode61 remove_diacritics 2');
 `;
 
 function now(): string {
@@ -1142,10 +1248,38 @@ export class VaultDO extends DurableObject<Env> {
   }
 
   /** Bytes this vault stores: live notes plus retained revision copies. */
-  private totals(): { totalBytes: number; noteCount: number; liveBytes: number; revisionBytes: number } {
+  private totals(): { totalBytes: number; noteCount: number; liveBytes: number; revisionBytes: number; sourceBytes: number } {
     const r = this.sql.exec<{ b: number | null; n: number }>("SELECT SUM(bytes) AS b, COUNT(*) AS n FROM notes").one();
     const rev = this.sql.exec<{ b: number | null }>("SELECT SUM(bytes) AS b FROM revisions").one();
-    return { totalBytes: (r.b ?? 0) + (rev.b ?? 0), noteCount: r.n, liveBytes: r.b ?? 0, revisionBytes: rev.b ?? 0 };
+    const src = this.sql.exec<{ b: number | null }>("SELECT SUM(bytes) AS b FROM note_sources").one();
+    return {
+      totalBytes: (r.b ?? 0) + (rev.b ?? 0) + (src.b ?? 0),
+      noteCount: r.n,
+      liveBytes: r.b ?? 0,
+      revisionBytes: rev.b ?? 0,
+      sourceBytes: src.b ?? 0,
+    };
+  }
+
+  /** A note's kept original texts, newest first. */
+  private sourcesOf(noteId: number, limit = 1000): SourceView[] {
+    return this.sql
+      .exec<{
+        id: number;
+        label: string | null;
+        text: string;
+        created_at: string;
+        client: string | null;
+        username: string | null;
+        redactions: number;
+        cut: number;
+      }>("SELECT id, label, text, created_at, client, username, redactions, cut FROM note_sources WHERE note_id = ? ORDER BY id DESC LIMIT ?", noteId, limit)
+      .toArray()
+      .map((x) => ({ ...x, cut: !!x.cut }));
+  }
+
+  private sourceCount(noteId: number): number {
+    return this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM note_sources WHERE note_id = ?", noteId).one().n;
   }
 
   /** Rebuild a note's observations (with their time index) and relations from its parsed markdown. */
@@ -1261,7 +1395,9 @@ export class VaultDO extends DurableObject<Env> {
      * change the checksum, so the checksum alone can't tell two moves apart.
      */
     expectedFilePath?: string;
-  }): Promise<Result<{ row: NoteRow; created: boolean }>> {
+    /** The write's original words (already redacted and cut by prepareSource): kept beside the note. */
+    source?: ReturnType<typeof prepareSource>;
+  }): Promise<Result<{ row: NoteRow; created: boolean; source?: SourceReceipt }>> {
     const { existing, markdown, caller } = opts;
     const bytes = new TextEncoder().encode(markdown).length;
     if (bytes > LIMITS.noteBytes) return fail("TOO_LARGE", `Note is ${bytes} bytes; the limit is ${LIMITS.noteBytes} bytes (1 MB).`);
@@ -1305,6 +1441,8 @@ export class VaultDO extends DurableObject<Env> {
     // Chunk ids are unique across the whole (shared) vector index: vault + note + kind + text.
     const chunks = chunkNote(title, parsed.body);
     const chunkIds = await Promise.all(chunks.map((c) => sha256Hex(`${ref.id}\u0000${uid}\u0000${c.kind}\u0000${c.text}`)));
+    // A source's chunks are unique to that source (its own id isn't known yet, so a random salt).
+    const salt = crypto.randomUUID();
 
     // Storage: the new markdown is added and the old one moves into a new revision row (content +
     // charged metadata). Reserve that up front (journaled, atomic in D1); release what pruning frees.
@@ -1322,7 +1460,12 @@ export class VaultDO extends DurableObject<Env> {
     const reservation = `r:${crypto.randomUUID()}`;
     // The note row is charged its markdown plus every field stored beside it.
     const noteBytes = bytes + VaultDO.rowOverhead([folder, filePath, title, permalink, fmJson, tags, prov.client, prov.username, uid]);
-    const amount = noteBytes + rowBytes;
+    // A kept original text: its words plus its row's fields.
+    const src = opts.source;
+    const sourceBytes = src ? VaultDO.rowOverhead([src.text, src.label, prov.userId, prov.username, prov.client]) : 0;
+    const sourceChunks = src ? chunkNote(title, src.text).map((c) => c.text) : [];
+    const sourceChunkIds = await Promise.all(sourceChunks.map((t) => sha256Hex(`${ref.id}\u0000${uid}\u0000source\u0000${salt}\u0000${t}`)));
+    const amount = noteBytes + rowBytes + sourceBytes;
     let reserved: boolean;
     try {
       reserved = await this.reserve(reservation, amount, opts.stagedCredit ?? 0);
@@ -1423,9 +1566,10 @@ export class VaultDO extends DurableObject<Env> {
         this.sql.exec("DELETE FROM notes_fts WHERE rowid = ?", id);
         this.sql.exec("INSERT INTO notes_fts (rowid, title, content, tags) VALUES (?, ?, ?, ?)", id, title, parsed.body, parsed.tags.join(" "));
         this.projectGraph(id, parsed);
-        // chunks: keep unchanged ones (same hash), queue removed ones for vector deletion
+        // chunks: keep unchanged ones (same hash), queue removed ones for vector deletion. A kept
+        // original text's chunks (kind 'source') belong to it, not to the body: they stay.
         const keep = new Set(chunkIds);
-        for (const c of this.sql.exec<{ id: string }>("SELECT id FROM chunks WHERE note_id = ?", id).toArray()) {
+        for (const c of this.sql.exec<{ id: string }>("SELECT id FROM chunks WHERE note_id = ? AND kind != 'source'", id).toArray()) {
           if (!keep.has(c.id)) {
             this.sql.exec("DELETE FROM chunks WHERE id = ?", c.id);
             this.sql.exec("INSERT OR IGNORE INTO vector_deletes (id) VALUES (?)", c.id);
@@ -1434,6 +1578,27 @@ export class VaultDO extends DurableObject<Env> {
         chunks.forEach((c, i) => {
           this.sql.exec("INSERT OR IGNORE INTO chunks (id, note_id, kind, text) VALUES (?,?,?,?)", chunkIds[i], id, c.kind, c.text);
         });
+        if (src) {
+          const sid = this.sql
+            .exec<{ id: number }>(
+              "INSERT INTO note_sources (note_id, label, text, bytes, redactions, cut, user_id, username, client, created_at) VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id",
+              id,
+              src.label,
+              src.text,
+              sourceBytes,
+              src.redactions,
+              src.cut ? 1 : 0,
+              prov.userId,
+              prov.username,
+              prov.client,
+              ts,
+            )
+            .one().id;
+          this.sql.exec("INSERT INTO sources_fts (rowid, text) VALUES (?, ?)", sid, src.text);
+          sourceChunks.forEach((text, i) => {
+            this.sql.exec("INSERT OR IGNORE INTO chunks (id, note_id, kind, text) VALUES (?,?,?,?)", sourceChunkIds[i], id, "source", text);
+          });
+        }
         this.sql.exec(
           `INSERT INTO revisions (note_id, permalink, title, action, prior_content, prior_checksum, checksum, user_id, username, client, tool, at, bytes, delta, prior_path, path)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -1484,7 +1649,11 @@ export class VaultDO extends DurableObject<Env> {
       [`type:${parsed.type}`]: existing ? 0 : 1,
     });
     await this.scheduleEmbedding();
-    return ok({ row, created: !existing });
+    return ok({
+      row,
+      created: !existing,
+      ...(src ? { source: { kept: true, bytes: sourceBytes, redactions: src.redactions, kinds: src.kinds, cut: src.cut } } : {}),
+    });
   }
 
   private async scheduleEmbedding() {
@@ -1749,7 +1918,8 @@ export class VaultDO extends DurableObject<Env> {
     else if (frontmatter.tags !== undefined) frontmatter.tags = normaliseTags(frontmatter.tags);
     // Only keys that change are rewritten; the rest of the frontmatter stays byte for byte.
     const markdown = setFrontmatter(args.content, frontmatter);
-    const res = await this.persist({ existing, markdown, folder, fallbackTitle: title, caller, fileName: existing ? undefined : fileName });
+    const source = args.source_text?.trim() ? prepareSource(args.source_text, args.source_label) : undefined;
+    const res = await this.persist({ existing, markdown, folder, fallbackTitle: title, caller, fileName: existing ? undefined : fileName, source });
     if (!res.ok) return res;
     const { row, created } = res.value;
     const before = existing ? new Set(parseNote(existing.content, ref.name).observations.map((o) => `${o.category}\u0000${o.content}`)) : new Set<string>();
@@ -1758,6 +1928,7 @@ export class VaultDO extends DurableObject<Env> {
     return ok({
       note: rowToInfo(row),
       created,
+      ...(res.value.source ? { source: res.value.source } : {}),
       ...this.totals(),
       similar: created ? this.similarTo(row) : [],
       unresolved: this.unresolvedFor(row.id),
@@ -1865,7 +2036,8 @@ export class VaultDO extends DurableObject<Env> {
       for (const [k, v] of Object.entries(args.metadata)) if (v === null) delete data[k];
       markdown = setFrontmatter(markdown, data);
     }
-    const res = await this.persist({ existing, markdown, folder: existing.folder, fallbackTitle: existing.title, caller });
+    const source = args.source_text?.trim() ? prepareSource(args.source_text, args.source_label) : undefined;
+    const res = await this.persist({ existing, markdown, folder: existing.folder, fallbackTitle: existing.title, caller, source });
     if (!res.ok) return res;
     const before = new Set(parseNote(existing.content, ref.name).observations.map((o) => `${o.category}\u0000${o.content}`));
     const newObs = parseNote(res.value.row.content, ref.name).observations.filter((o) => !before.has(`${o.category}\u0000${o.content}`));
@@ -1873,6 +2045,7 @@ export class VaultDO extends DurableObject<Env> {
     return ok({
       note: rowToInfo(res.value.row),
       created: false,
+      ...(res.value.source ? { source: res.value.source } : {}),
       ...this.totals(),
       similar: [],
       unresolved: this.unresolvedFor(existing.id),
@@ -1914,6 +2087,11 @@ export class VaultDO extends DurableObject<Env> {
         this.sql.exec("DELETE FROM chunks WHERE note_id = ?", existing.id);
         this.sql.exec("DELETE FROM notes WHERE id = ?", existing.id);
         this.sql.exec("DELETE FROM aliases WHERE note_id = ?", existing.id);
+        // Its kept original texts go with it (not into the trash: restoring the note brings back its body only).
+        for (const x of this.sql.exec<{ id: number }>("SELECT id FROM note_sources WHERE note_id = ?", existing.id).toArray())
+          this.sql.exec("DELETE FROM sources_fts WHERE rowid = ?", x.id);
+        const sourceBytes = this.sql.exec<{ b: number | null }>("SELECT SUM(bytes) AS b FROM note_sources WHERE note_id = ?", existing.id).one().b ?? 0;
+        this.sql.exec("DELETE FROM note_sources WHERE note_id = ?", existing.id);
         const del = this.sql
           .exec<{ id: number }>(
             `INSERT INTO revisions (note_id, permalink, title, action, prior_content, prior_checksum, checksum, user_id, username, client, tool, at, bytes, delta)
@@ -1935,7 +2113,7 @@ export class VaultDO extends DurableObject<Env> {
           )
           .one().id;
         // Live copy -> trash row (+ its metadata); older rows of this note and notes beyond the trash cap go.
-        this.journalAdjust(rowBytes - this.pruneTrash(existing.id, del));
+        this.journalAdjust(rowBytes - sourceBytes - this.pruneTrash(existing.id, del));
       });
     } catch (e) {
       if (e instanceof TxAbort) return fail(e.code, e.message);
@@ -2479,9 +2657,23 @@ export class VaultDO extends DurableObject<Env> {
       include_content?: boolean;
       include_frontmatter?: boolean;
       max_tokens?: number;
+      /** Also return the note's kept original texts (newest first, up to SOURCE_READ_MAX_BYTES). */
+      sources?: boolean;
     },
   ): Promise<
-    Result<{ note: NoteInfo; content: string | null; total_lines: number; start_line: number; end_line: number; truncated: boolean; next_start_line?: number }>
+    Result<{
+      note: NoteInfo;
+      content: string | null;
+      total_lines: number;
+      start_line: number;
+      end_line: number;
+      truncated: boolean;
+      next_start_line?: number;
+      /** How many original texts the note keeps (0: none). */
+      source_count: number;
+      /** With sources=true: the newest that fit SOURCE_READ_MAX_BYTES. */
+      sources?: SourceView[];
+    }>
   > {
     this.bind(ref);
     const row = this.resolve(args.identifier);
@@ -2522,6 +2714,17 @@ export class VaultDO extends DurableObject<Env> {
       }
     }
     const content = args.include_content === false ? null : lines.slice(start - 1, end).join("\n");
+    const sourceCount = this.sourceCount(row.id);
+    let sources: SourceView[] | undefined;
+    if (args.sources) {
+      sources = [];
+      let used = 0;
+      for (const x of this.sourcesOf(row.id)) {
+        used += x.text.length;
+        if (sources.length && used > SOURCE_READ_MAX_BYTES) break;
+        sources.push(x);
+      }
+    }
     await this.count({ op_read: 1 });
     return ok({
       note: rowToInfo(row),
@@ -2531,6 +2734,8 @@ export class VaultDO extends DurableObject<Env> {
       end_line: end,
       truncated,
       ...(truncated ? { next_start_line: end + 1 } : {}),
+      source_count: sourceCount,
+      ...(sources ? { sources } : {}),
     });
   }
 
@@ -2554,7 +2759,15 @@ export class VaultDO extends DurableObject<Env> {
       links[r.to_name] = resolved?.permalink ?? null;
       return { type: r.type, target: r.to_name, context: r.context, resolved };
     });
-    return ok({ note: rowToInfo(row), content: row.content, observations, relations, backlinks: this.backlinks(row), links });
+    return ok({
+      note: rowToInfo(row),
+      content: row.content,
+      observations,
+      relations,
+      backlinks: this.backlinks(row),
+      links,
+      sources: this.sourcesOf(row.id, 50),
+    });
   }
 
   private backlinks(row: { id: number; title: string; permalink: string }) {
@@ -3944,6 +4157,10 @@ export class VaultDO extends DurableObject<Env> {
     const modesUsed: string[] = [];
     const lists: string[][] = [];
     const obsHits = new Map<number, number[]>(); // note id -> observation ids
+    // Matches in a note's kept original text (ranked after body matches): note id -> source ids.
+    const srcHits = new Map<number, number[]>();
+    // Notes the body matched (text or meaning); a note matched only through its source is labelled so.
+    const bodyHit = new Set<number>();
 
     // Observation-level structure (categories, authored time): note id -> matching observation ids.
     const structObs = new Map<number, number[]>();
@@ -3999,7 +4216,13 @@ export class VaultDO extends DurableObject<Env> {
           validOn,
         )
         .toArray();
-      return { noteIds, obs };
+      const src = this.sql
+        .exec<{ id: number; note_id: number }>(
+          "SELECT s.id, s.note_id FROM sources_fts f JOIN note_sources s ON s.id = f.rowid WHERE sources_fts MATCH ? ORDER BY bm25(sources_fts) LIMIT 200",
+          e,
+        )
+        .toArray();
+      return { noteIds, obs, src };
     };
 
     if (mode === "title" || mode === "permalink") {
@@ -4021,7 +4244,7 @@ export class VaultDO extends DurableObject<Env> {
     } else {
       if ((mode === "hybrid" || mode === "text") && expr) {
         modesUsed.push("text");
-        let res: { noteIds: number[]; obs: { id: number; note_id: number }[] };
+        let res: { noteIds: number[]; obs: { id: number; note_id: number }[]; src: { id: number; note_id: number }[] };
         try {
           res = runFts(expr);
           if (terms.length > 1 && new Set([...res.noteIds, ...res.obs.map((o) => o.note_id)]).size < 10) {
@@ -4029,9 +4252,11 @@ export class VaultDO extends DurableObject<Env> {
             const or = runFts(ftsQuery(query, "OR").expr ?? expr);
             const seenNotes = new Set(res.noteIds);
             const seenObs = new Set(res.obs.map((o) => o.id));
+            const seenSrc = new Set(res.src.map((o) => o.id));
             res = {
               noteIds: [...res.noteIds, ...or.noteIds.filter((id) => !seenNotes.has(id))],
               obs: [...res.obs, ...or.obs.filter((o) => !seenObs.has(o.id))],
+              src: [...res.src, ...or.src.filter((o) => !seenSrc.has(o.id))],
             };
           }
         } catch (e) {
@@ -4050,6 +4275,15 @@ export class VaultDO extends DurableObject<Env> {
           }
         }
         for (const o of res.obs) obsHits.set(o.note_id, [...(obsHits.get(o.note_id) ?? []), o.id]);
+        for (const id of ranked) bodyHit.add(id);
+        // Original-text matches rank below every body match.
+        for (const x of res.src) {
+          srcHits.set(x.note_id, [...(srcHits.get(x.note_id) ?? []), x.id]);
+          if (!seen.has(x.note_id)) {
+            seen.add(x.note_id);
+            ranked.push(x.note_id);
+          }
+        }
         lists.push(ranked.map(String));
       }
       const semanticText = terms.join(" ");
@@ -4073,11 +4307,24 @@ export class VaultDO extends DurableObject<Env> {
             const matches = await index.query(ref.id, qv, 50);
             const ranked: string[] = [];
             const seen = new Set<number>();
+            const bySource: number[] = [];
             for (const m of matches) {
-              const c = this.sql.exec<{ note_id: number }>("SELECT note_id FROM chunks WHERE id = ?", m.id).toArray()[0];
-              if (c && !seen.has(c.note_id) && m.score > (args.min_similarity ?? 0.2)) {
+              const c = this.sql.exec<{ note_id: number; kind: string }>("SELECT note_id, kind FROM chunks WHERE id = ?", m.id).toArray()[0];
+              if (!c || m.score <= (args.min_similarity ?? 0.2)) continue;
+              if (c.kind === "source") {
+                if (!bySource.includes(c.note_id)) bySource.push(c.note_id);
+              } else if (!seen.has(c.note_id)) {
                 seen.add(c.note_id);
+                bodyHit.add(c.note_id);
                 ranked.push(String(c.note_id));
+              }
+            }
+            // A note close in meaning only through its original text ranks after the body matches.
+            for (const id of bySource) {
+              if (!srcHits.has(id)) srcHits.set(id, []);
+              if (!seen.has(id)) {
+                seen.add(id);
+                ranked.push(String(id));
               }
             }
             modesUsed.push("semantic");
@@ -4204,6 +4451,30 @@ export class VaultDO extends DurableObject<Env> {
       return matches;
     };
 
+    // Where a note matched in its kept original text: the matching source (or the newest) and its
+    // first line holding a query word. Notes without a source match get nothing (output unchanged).
+    const sourceMatch = (row: NoteRow): SearchHit["source_match"] | undefined => {
+      const ids = srcHits.get(row.id);
+      if (!ids) return undefined;
+      const x = this.sql
+        .exec<{ text: string; label: string | null; created_at: string }>(
+          ids.length
+            ? `SELECT text, label, created_at FROM note_sources WHERE id IN (${ids.map(() => "?").join(",")}) ORDER BY id DESC LIMIT 1`
+            : "SELECT text, label, created_at FROM note_sources WHERE note_id = ? ORDER BY id DESC LIMIT 1",
+          ...(ids.length ? ids : [row.id]),
+        )
+        .toArray()[0];
+      if (!x) return undefined;
+      const line = lowerTerms.length
+        ? (x.text
+            .split("\n")
+            .find((l) => lowerTerms.some((t) => l.toLowerCase().includes(t)))
+            ?.trim()
+            .slice(0, 240) ?? null)
+        : null;
+      return { at: x.created_at, label: x.label, line, only: !bodyHit.has(row.id) };
+    };
+
     // Jev re-ranking of the top of the fused list (only when that window affects this page).
     let rerank: SearchResult["rerank"];
     const relevance = new Map<number, number>();
@@ -4224,6 +4495,10 @@ export class VaultDO extends DurableObject<Env> {
           type: row.type,
           matches: [
             ...matchingLines(row).map((m) => m.text),
+            ...(() => {
+              const sm = sourceMatch(row);
+              return sm?.line ? [`(original text) ${sm.line}`] : [];
+            })(),
             ...(obsHits.get(row.id) ?? [])
               .slice(0, 3)
               .map((oid) => this.sql.exec<{ category: string; content: string }>("SELECT category, content FROM observations WHERE id = ?", oid).one())
@@ -4395,6 +4670,10 @@ export class VaultDO extends DurableObject<Env> {
         ...(args.detail === "full" ? { content: row.content } : {}),
         ...(outline && outline.entries.length >= 2 ? { outline } : {}),
         ...(relations.length ? { relations } : {}),
+        ...(() => {
+          const sm = sourceMatch(row);
+          return sm ? { source_match: sm } : {};
+        })(),
       };
     });
     await this.count({ op_search: 1 });
@@ -4636,14 +4915,20 @@ export class VaultDO extends DurableObject<Env> {
   }
 
   /** Every note as stored, for export. */
-  async exportFiles(ref: VaultRef): Promise<{ path: string; content: string; title: string; permalink: string }[]> {
+  async exportFiles(ref: VaultRef): Promise<{ path: string; content: string; title: string; permalink: string; sources?: string }[]> {
     this.bind(ref);
     return this.sql
-      .exec<{ file_path: string; content: string; title: string; permalink: string }>(
-        "SELECT file_path, content, title, permalink FROM notes ORDER BY file_path",
+      .exec<{ id: number; file_path: string; content: string; title: string; permalink: string; n: number }>(
+        "SELECT id, file_path, content, title, permalink, (SELECT COUNT(*) FROM note_sources s WHERE s.note_id = notes.id) AS n FROM notes ORDER BY file_path",
       )
       .toArray()
-      .map((r) => ({ path: r.file_path, content: r.content, title: r.title, permalink: r.permalink }));
+      .map((r) => ({
+        path: r.file_path,
+        content: r.content,
+        title: r.title,
+        permalink: r.permalink,
+        ...(r.n ? { sources: sourcesMarkdown(r.title, r.permalink, this.sourcesOf(r.id)) } : {}),
+      }));
   }
 
   /**

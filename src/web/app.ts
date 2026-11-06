@@ -38,6 +38,7 @@ import { accountJson, buildExportZip } from "./export";
 import { isSerious, memoryScoreSection, registerFun, seriousModeSettings } from "./fun";
 import { importEnabled, registerImport } from "./importer";
 import { ago, folderHref, type H, html, icon, layout, noteHref, raw, when } from "./layout";
+import { registerMisses } from "./misses";
 import { safeNext } from "./next";
 import { escapeHtml, renderMarkdown } from "./render";
 import { registerRound2 } from "./round2";
@@ -863,6 +864,7 @@ export function createApp(opts: { verifier?: WebAuthnVerifier } = {}) {
   registerAccount(app, page as never, loginRedirect);
   registerImport(app, page as never, loginRedirect);
   registerFun(app, page as never, loginRedirect);
+  registerMisses(app, page as never, loginRedirect);
 
   app.notFound((c) =>
     c.html(

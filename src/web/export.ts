@@ -6,6 +6,7 @@ import { strToU8, zipSync } from "fflate";
 import { exportAttachments } from "../capture/files";
 import { listOwnedVaults, type Vault, vaultRef, vaultStub } from "../directory";
 import type { Env } from "../env";
+import { listMisses } from "../misses";
 
 /** Account metadata for "download everything": no secrets (no keys, hashes or tokens). */
 export async function accountJson(env: Env, user: { id: string; username: string; created_at: string }): Promise<Record<string, unknown>> {
@@ -28,6 +29,9 @@ export async function accountJson(env: Env, user: { id: string; username: string
     projects: vaults.map((v) => ({ name: v.name, default: !!v.is_default, notes: v.note_count, guide: v.guide ?? null })),
     guidance: (await env.DB.prepare("SELECT guidance FROM users WHERE id = ?").bind(user.id).first<{ guidance: string | null }>())?.guidance ?? null,
     attachments: "included under <project>/attachments/; links to them in notes are relative paths",
+    original_text: "a note's kept original text is in <note>.sources.md beside it",
+    // Questions the notes didn't answer (yours only, dismissed ones too), newest first.
+    misses: (await listMisses(env, user.id, { limit: 500, dismissed: true })).map(({ id: _id, vault_id: _v, ...m }) => m),
   };
 }
 
@@ -41,6 +45,7 @@ export async function buildExportZip(env: Env, userId: string, only?: Vault, acc
     `Exported ${new Date().toISOString()}.`,
     "",
     "Each note is the markdown exactly as stored. Links use [[Wiki Link]] syntax (Basic Memory / Obsidian compatible).",
+    "A note that keeps the original words it was written from has them in `<note>.sources.md` beside it.",
     "",
   ];
   for (const v of vaults) {
@@ -52,6 +57,8 @@ export async function buildExportZip(env: Env, userId: string, only?: Vault, acc
     for (const n of notes) {
       const path = `${v.name}/${n.path}`;
       files[path] = strToU8(att.rewrite(n.content, n.path.split("/").length - 1));
+      // Its kept original text, verbatim, beside it.
+      if (n.sources) files[path.replace(/\.md$/i, "") + ".sources.md"] = strToU8(n.sources);
       index.push(`- [${n.title.replace(/[[\]]/g, "")}](${path.split("/").map(encodeURIComponent).join("/")}) — \`${n.permalink}\``);
     }
     if (!notes.length) index.push("_(empty)_");

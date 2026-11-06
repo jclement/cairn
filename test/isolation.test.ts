@@ -57,7 +57,14 @@ describe("user isolation: B can never see A's notes", () => {
     const zip = unzipSync(new Uint8Array(await (await fetchWorker("/export", { headers: h })).arrayBuffer()));
     for (const [path, bytes] of Object.entries(zip)) {
       expect(path).not.toContain("private");
-      expect(strFromU8(bytes)).not.toContain("zebra");
+      let body = strFromU8(bytes);
+      if (path === "account.json") {
+        // B's own misses hold B's own queries (B searched "zebra" above): B's data, not A's.
+        const acct = JSON.parse(body) as { misses: { query: string }[] };
+        expect(acct.misses.filter((m) => m.query.includes("zebra")).every((m) => m.query === "zebra")).toBe(true);
+        body = JSON.stringify({ ...acct, misses: [] });
+      }
+      expect(body).not.toContain("zebra");
     }
   });
 });

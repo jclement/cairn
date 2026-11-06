@@ -184,6 +184,19 @@ export function* readNotes(zip: Uint8Array, plan: ImportPlan, prefix: string | n
       yield { path: n.path, folder: n.folder, title: n.title, content: null, status: "skipped", message: "not valid UTF-8 text" };
       continue;
     }
+    // A Cairn export's kept original text (<note>.sources.md, type cairn-sources) is not a note:
+    // importing it back as one would clutter the project, and re-attaching it isn't supported.
+    if (/\.sources\.md$/i.test(n.path) && splitFrontmatter(content).data.type === "cairn-sources") {
+      yield {
+        path: n.path,
+        folder: n.folder,
+        title: n.title,
+        content: null,
+        status: "skipped",
+        message: "a note's original text from a Cairn export: not imported (it stays in your export)",
+      };
+      continue;
+    }
     if (re) {
       const fm = splitFrontmatter(content);
       if (fm.raw !== null) content = content.slice(0, content.length - fm.body.length).replace(re, "$1") + fm.body;

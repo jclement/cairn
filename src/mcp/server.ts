@@ -15,10 +15,22 @@ import { registerCaptureTools } from "../capture/mcp";
 import { canWriteVault, createVault, getGuidance, getVault, guideSummary, listVaults, type Vault, vaultRef, vaultStub } from "../directory";
 import { type Caller, DEFAULT_CORE_BUDGET, type Env, SCOPE_WRITE, VERSION } from "../env";
 import { outlineLine, outlineOf } from "../markdown/outline";
+import { briefFilters, listMisses, type MissKind, missLine, recordMiss } from "../misses";
 import { diffText, inferText, validateText, validationCounts } from "../schema/picoschema";
+import { redactionLine } from "../secrets";
 import { admitWrites } from "../stats/limits";
 import { bump } from "../stats/record";
-import { ANSWER_PACK_HITS, FOLDER_OP_MAX, type NoteInfo, type SearchHit, type SearchResult, type WriteHints } from "../vault/do";
+import {
+  ANSWER_PACK_HITS,
+  FOLDER_OP_MAX,
+  type NoteInfo,
+  type SearchHit,
+  type SearchResult,
+  SOURCE_LABEL_MAX,
+  SOURCE_MAX_BYTES,
+  type SourceReceipt,
+  type WriteHints,
+} from "../vault/do";
 import { filtersProblem } from "../vault/filters";
 import { parseSince, parseUntil, SINCE_HELP, UNTIL_HELP } from "../vault/time";
 import { manPage, manSearch, type ToolDoc } from "./man";
@@ -33,8 +45,9 @@ export interface McpIdentity {
 
 export const INSTRUCTIONS = `Cairn is the user's long-term memory: markdown notes in projects (default project: the user's default, usually "main"; projects others share with the user are named owner/name). help documents every tool.
 Notes use Basic Memory's format: YAML frontmatter (title, type, tags), observations as "- [category] fact #tag (context)", relations as "- relation_type [[Other Note]]", and inline [[Wiki Links]]. Links to notes that don't exist yet are fine.
-Answering from notes: answer only from what the notes state. If the notes don't state it, say so plainly and stop: don't offer a best guess, a "most likely" option or an inference from nearby facts. Search results are excerpts: read the relevant notes (read_note) before answering a detailed or multi-part question, and before concluding the notes don't cover something. For a question with several parts, make sure each part is answered from a note, or say which part the notes don't cover. Whole-note reads and the top search results show the note's outline (each section with its number of list items and table rows): before answering, check every listed item you need made it into the answer.
+Answering from notes: answer only from what the notes state. If the notes don't state it, say so plainly and stop: don't offer a best guess, a "most likely" option or an inference from nearby facts; then call log_miss with the question, so the user sees what their memory lacks. Search results are excerpts: read the relevant notes (read_note) before answering a detailed or multi-part question, and before concluding the notes don't cover something. For a question with several parts, make sure each part is answered from a note, or say which part the notes don't cover. Whole-note reads and the top search results show the note's outline (each section with its number of list items and table rows): before answering, check every listed item you need made it into the answer.
 Workflow: search_notes before writing (avoid duplicates; search again with what you learn), read_note to open a note, write_note to create, edit_note for partial changes (pass expected_checksum from your last read to avoid clobbering), build_context to walk links from a note.
+When a note comes from someone's words (a message, an email), pass them verbatim as source_text; never secrets.
 Every successful write returns a receipt "saved <project>/<permalink> rev <rev> at <time> — <url>". Quote it to the user. If you have no receipt, nothing was saved.
 Start of a session: call core_memory to load the user's core memory (their index note and pinned notes).
 When a fact changes, use supersede rather than deleting the old one: history stays searchable with search_notes as_of.
@@ -83,6 +96,21 @@ export function noteUrl(env: Env, vault: string, permalink: string): string {
 export function receipt(env: Env, vault: string, note: NoteInfo, verb = "saved"): string {
   return `${verb} ${vault}/${note.permalink} rev ${note.checksum.slice(0, 8)} at ${note.updated_at} — ${noteUrl(env, vault, note.permalink)}`;
 }
+
+/** The receipt line for a write's source_text. */
+export function sourceLine(s: SourceReceipt): string {
+  const extra = [s.cut ? `cut to ${SOURCE_MAX_BYTES / 1024} KB` : "", s.redactions ? redactionLine({ count: s.redactions, kinds: s.kinds }) : ""].filter(
+    Boolean,
+  );
+  return `original text kept (${Math.max(1, Math.round(s.bytes / 1024))} KB${extra.length ? `; ${extra.join("; ")}` : ""})`;
+}
+
+const sourceTextParam = z
+  .string()
+  .max(1_000_000)
+  .optional()
+  .describe(`The words the note comes from (message, email, snippet), verbatim; kept beside it, searchable. No secrets. Max ${SOURCE_MAX_BYTES / 1024} KB.`);
+const sourceLabelParam = z.string().max(SOURCE_LABEL_MAX).optional().describe("Where source_text came from, e.g. 'user in chat'");
 
 /** The fields Basic Memory's read_note/write_note JSON carry at the top level. */
 function noteFields(note: NoteInfo) {
@@ -155,7 +183,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
     "write_note",
     {
       description:
-        "Create a note, or replace one (overwrite=true or expected_checksum). Give a file path as identifier ('notes/plan.md': the file lands exactly there) or title + directory. An existing note is ALREADY_EXISTS unless overwrite. Returns a receipt, the path and the checksum.",
+        "Create a note, or replace one (overwrite=true or expected_checksum). Give a file path as identifier ('notes/plan.md': the file lands exactly there) or title + directory. An existing note is ALREADY_EXISTS unless overwrite. When the note comes from someone's words, pass them verbatim as source_text. Returns a receipt, the path and the checksum.",
       inputSchema: strict("write_note", {
         content: z.string().describe("The note's Markdown; it may start with frontmatter"),
         identifier: z
@@ -177,6 +205,8 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
         metadata: z.record(z.string(), z.unknown()).optional().describe("Extra frontmatter fields, merged in"),
         overwrite: z.boolean().optional().describe("Replace a note that already exists"),
         expected_checksum: z.string().min(1).optional().describe("Replace only while the note is still this revision (from read_note); implies overwrite"),
+        source_text: sourceTextParam,
+        source_label: sourceLabelParam,
         project: projectParam,
         output_format: outputFormat,
       }),
@@ -202,9 +232,11 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
           unresolved: r.value.unresolved,
           similar: r.value.similar,
           ...(r.value.hints ? { hints: r.value.hints } : {}),
+          ...(r.value.source ? { source: r.value.source } : {}),
         });
       }
       const lines = [receipt(env, v.name, r.value.note, verb), `file_path ${r.value.note.file_path}`, `checksum ${r.value.note.checksum}`];
+      if (r.value.source) lines.push(sourceLine(r.value.source));
       if (r.value.unresolved.length) lines.push(`unresolved links (fine; they resolve when those notes exist): ${r.value.unresolved.join(", ")}`);
       if (r.value.similar.length && !r.value.hints)
         lines.push(`similar notes (did you mean to extend one?): ${r.value.similar.map((s) => `${s.title} (${s.permalink})`).join("; ")}`);
@@ -232,6 +264,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
           .describe("Approximate token budget; longer content is cut at a section or paragraph boundary and the result says where to continue"),
         include_frontmatter: z.boolean().optional().describe("Include the YAML frontmatter in a whole-note read (default true)"),
         include_content: z.boolean().optional().describe("false = metadata and checksum only"),
+        sources: z.boolean().optional().describe("Also return the original text the note was written from, when it keeps any"),
         project: projectParam,
         output_format: outputFormat,
       }),
@@ -243,14 +276,16 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
       const { project: _p, output_format, ...rest } = args;
       const r = await vaultStub(env, v).readNote(vaultRef(v), rest);
       if (!r.ok) return refuse(r.code, r.message);
-      const { note, content, total_lines, start_line, end_line, truncated, next_start_line } = r.value;
+      const { note, content, total_lines, start_line, end_line, truncated, next_start_line, source_count, sources } = r.value;
+      // Notes without an original text read exactly as before (no extra line, no extra field).
+      const srcJson = source_count ? { source_count, ...(sources ? { sources } : {}) } : {};
       const partial = start_line > 1 || end_line < total_lines;
       // A whole-note read starts with the note's outline (sections with their item counts), so a
       // summary can check it covered every enumerated part.
       const outline = content !== null && !partial ? outlineOf(content) : null;
       const hasOutline = !!outline && outline.entries.length >= 2;
       if (output_format === "json") {
-        if (content === null) return json({ project: v.name, ...noteFields(note) });
+        if (content === null) return json({ project: v.name, ...noteFields(note), ...srcJson });
         return json({
           project: v.name,
           ...noteFields(note),
@@ -262,10 +297,21 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
           ...(next_start_line ? { next_start_line } : {}),
           ...(hasOutline && outline ? { outline: outline.entries } : {}),
           note,
+          ...srcJson,
         });
       }
       const head = `# ${note.title}\nproject: ${v.name} | permalink: ${note.permalink} | file_path: ${note.file_path} | type: ${note.type} | checksum: ${note.checksum}\nupdated ${note.updated_at} by ${note.updated_by_client ?? "?"} | lines ${start_line}-${end_line} of ${total_lines}${truncated ? `; next: start_line=${next_start_line}` : ""}`;
-      if (content === null) return text(head);
+      const srcTail = !source_count
+        ? ""
+        : sources
+          ? `\n\n## Original text (${source_count} kept, newest first${sources.length < source_count ? `; ${sources.length} shown` : ""})\n${sources
+              .map(
+                (x) =>
+                  `\n### ${x.created_at}${x.label ? ` — ${x.label}` : ""}${x.client ? ` (via ${x.client})` : ""}${x.redactions ? ` [${x.redactions} secret(s) redacted]` : ""}\n${x.text}`,
+              )
+              .join("\n")}`
+          : `\n\nOriginal text: ${source_count} kept (read_note sources=true)`;
+      if (content === null) return text(head + srcTail);
       const outlineText = hasOutline && outline ? `\noutline: ${outlineLine(outline)}` : "";
       // A partial read returns numbered lines (as Basic Memory); a whole note comes back as stored.
       const body = partial
@@ -276,7 +322,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
         : content;
       const files = await describeAttachments(env, v, content, new URL(env.PUBLIC_URL).origin).catch(() => []);
       const tail = files.length ? `\n\nattachments (open the URLs signed in, or ask the user):\n${files.join("\n")}` : "";
-      return text(`${head}${outlineText}\n\n${body}${tail}`);
+      return text(`${head}${outlineText}\n\n${body}${tail}${srcTail}`);
     },
   );
 
@@ -285,7 +331,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
     "edit_note",
     {
       description:
-        "Edit a note in place. command: append | prepend (content) | find_replace (find_text must occur expected_replacements times, default 1) | replace_section | insert_before_section | insert_after_section (section, as read_note takes it) | set_metadata (merge metadata into the frontmatter; null removes a key). metadata also merges with any other command. Pass expected_checksum to edit only the revision you read.",
+        "Edit a note in place. command: append | prepend (content) | find_replace (find_text must occur expected_replacements times, default 1) | replace_section | insert_before_section | insert_after_section (section, as read_note takes it) | set_metadata (merge metadata into the frontmatter; null removes a key). metadata also merges with any other command. Pass expected_checksum to edit only the revision you read; source_text as write_note.",
       inputSchema: strict("edit_note", {
         identifier: z.string().min(1),
         command: z.enum(["append", "prepend", "find_replace", "replace_section", "insert_before_section", "insert_after_section", "set_metadata"]),
@@ -299,6 +345,8 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
           .describe("replace_section: true (default) replaces subsections too; false stops at the first subsection heading"),
         metadata: z.record(z.string(), z.unknown()).optional(),
         expected_checksum: z.string().min(1).optional(),
+        source_text: sourceTextParam,
+        source_label: sourceLabelParam,
         project: projectParam,
         output_format: outputFormat,
       }),
@@ -319,12 +367,14 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
           ...noteFields(r.value.note),
           receipt: receipt(env, v.name, r.value.note, "updated"),
           ...(r.value.hints ? { hints: r.value.hints } : {}),
+          ...(r.value.source ? { source: r.value.source } : {}),
         });
       return text(
         [
           `${receipt(env, v.name, r.value.note, "updated")}`,
           `file_path ${r.value.note.file_path}`,
           `checksum ${r.value.note.checksum}`,
+          ...(r.value.source ? [sourceLine(r.value.source)] : []),
           ...hintLines(r.value.hints),
           ...guideLine(v),
         ].join("\n"),
@@ -555,6 +605,36 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
         };
       }
       const label = targets.length === 1 ? targets[0].name : targets.map((t) => t.name).join(", ");
+      // A miss: the first page came back empty, or nothing on it answers the query (the header below).
+      const missKind: MissKind | null =
+        page !== 1 ? null : !result.hits.length ? "empty" : result.rerank?.applied && result.rerank.any_match_band === "no" ? "no_answer" : null;
+      if (missKind)
+        await recordMiss(env, {
+          userId: who.userId,
+          vaultId: targets.length === 1 ? targets[0].id : null,
+          vaultName: label,
+          query: args.query?.trim() || "(no query: filters only)",
+          tool: "search_notes",
+          kind: missKind,
+          filters: briefFilters(args, [
+            "mode",
+            "filters",
+            "note_types",
+            "categories",
+            "tags",
+            "since",
+            "until",
+            "path",
+            "identifier",
+            "items",
+            "as_of",
+            "valid_at",
+            "valid_overlaps",
+            "time_kind",
+            "all_projects",
+          ]),
+          client: who.clientName,
+        });
       const strip = (h: SearchHit & { project: string }) =>
         compact
           ? {
@@ -692,6 +772,17 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
       const found = await vaultStub(env, v).find(vaultRef(v), rest);
       if (!found.ok) return refuse(found.code, found.message);
       const r = found.value;
+      if (!r.results.length && (args.page ?? 1) === 1)
+        await recordMiss(env, {
+          userId: who.userId,
+          vaultId: v.id,
+          vaultName: v.name,
+          query: args.name ?? "(frontmatter filters)",
+          tool: "find_notes",
+          kind: "empty",
+          filters: briefFilters(args, ["filters", "path", "depth"]),
+          client: who.clientName,
+        });
       const results = r.results.map(({ fields_json, ...x }) => ({
         ...x,
         ...(fields_json ? { fields: JSON.parse(fields_json) as Record<string, unknown> } : {}),
@@ -742,7 +833,19 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
         page: args.page,
         page_size: args.page_size,
       });
-      if (!r.ok) return refuse(r.code, r.message);
+      if (!r.ok) {
+        if (r.code === "NOT_FOUND")
+          await recordMiss(env, {
+            userId: who.userId,
+            vaultId: v.id,
+            vaultName: v.name,
+            query: args.identifier,
+            tool: "build_context",
+            kind: "not_found",
+            client: who.clientName,
+          });
+        return refuse(r.code, r.message);
+      }
       const primary = args.compact ? r.value.primary.map((p) => ({ ...p, observations: [] })) : r.value.primary;
       if (args.output_format === "json") return json({ project: v.name, ...(v.guide ? { guide: v.guide } : {}), ...r.value, primary });
       const lines: string[] = v.guide ? [guideBlock(v).trimEnd(), ""] : [];
@@ -766,13 +869,16 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
     },
   );
 
+  const itemsParam = z
+    .union([z.array(z.enum(["note", "observation", "relation", "miss"])), z.number().int().positive().max(100)])
+    .optional()
+    .describe(
+      "What to return: notes (default), observations, relations, or miss (questions the notes didn't answer; all projects unless project given). (A number is Cairn's older page_size.)",
+    );
   const recentShape = {
     project: projectParam,
     since: sinceParam,
-    items: z
-      .union([z.array(z.enum(["note", "observation", "relation"])), z.number().int().positive().max(100)])
-      .optional()
-      .describe("What to return: notes (default), observations, relations. (A number is Cairn's older page_size.)"),
+    items: itemsParam,
     page: z.number().int().positive().optional(),
     page_size: z.number().int().min(1).max(100).optional(),
     output_format: outputFormat,
@@ -780,7 +886,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
   type RecentArgs = {
     project?: string;
     since?: string;
-    items?: ("note" | "observation" | "relation")[] | number;
+    items?: ("note" | "observation" | "relation" | "miss")[] | number;
     page?: number;
     page_size?: number;
     output_format?: "text" | "json";
@@ -788,9 +894,13 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
   async function recentReply(args: RecentArgs): Promise<ToolText> {
     const bad = badSince(args.since);
     if (bad) return bad;
+    if (Array.isArray(args.items) && args.items.includes("miss")) {
+      if (args.items.length > 1) return refuse("INVALID", 'items="miss" lists misses on its own; ask for notes, observations or relations in another call.');
+      return missesReply(args);
+    }
     const v = await vaultFor(args.project);
     if (isRefusal(v)) return v;
-    const kinds = Array.isArray(args.items) ? args.items : ["note"];
+    const kinds = (Array.isArray(args.items) ? args.items : ["note"]) as ("note" | "observation" | "relation")[];
     const limit = args.page_size ?? (typeof args.items === "number" ? args.items : undefined);
     const stub = vaultStub(env, v);
     const r = await stub.recent(vaultRef(v), { since: args.since, limit, page: args.page });
@@ -819,6 +929,64 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
     return text(`${guideBlock(v)}${lines.length ? lines.join("\n") : `No changes in ${v.name}${args.since ? ` since ${args.since}` : ""}.`}`);
   }
 
+  /** The caller's own misses (newest first): every project, or the one named. */
+  async function missesReply(args: RecentArgs): Promise<ToolText> {
+    let vaultId: string | undefined;
+    if (args.project) {
+      const v = await vaultFor(args.project);
+      if (isRefusal(v)) return v;
+      vaultId = v.id;
+    }
+    const since = args.since ? parseSince(args.since) : undefined;
+    const size = args.page_size ?? 50;
+    const rows = await listMisses(env, who.userId, {
+      vaultId,
+      since: since ?? undefined,
+      limit: size + 1,
+      offset: ((args.page ?? 1) - 1) * size,
+    });
+    const more = rows.length > size;
+    const shown = rows.slice(0, size);
+    if (args.output_format === "json") return json({ misses: shown, has_more: more });
+    if (!shown.length) return text(`No misses${args.project ? ` in ${args.project}` : ""}${args.since ? ` since ${args.since}` : ""}.`);
+    return text(
+      [
+        ...shown.map(missLine),
+        `— ${shown.length} miss(es)${more ? `; more: page=${(args.page ?? 1) + 1}` : ""}. Dismiss or clear them at ${new URL(env.PUBLIC_URL).origin}/app/misses`,
+      ].join("\n"),
+    );
+  }
+
+  // ---- log_miss ----
+  server.registerTool(
+    "log_miss",
+    {
+      description: "Record a question the notes didn't answer (after telling the user so), for the user to review. Empty searches are recorded already.",
+      inputSchema: strict("log_miss", {
+        question: z.string().min(1).max(2000),
+        expected: z.string().max(2000).optional().describe("What you expected to find"),
+        project: projectParam,
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    },
+    async (args) => {
+      const v = await vaultFor(args.project);
+      if (isRefusal(v)) return v;
+      const r = await recordMiss(env, {
+        userId: who.userId,
+        vaultId: v.id,
+        vaultName: v.name,
+        query: args.question,
+        tool: "log_miss",
+        kind: "explicit",
+        expected: args.expected,
+        client: who.clientName,
+      });
+      if (!r) return text("Not logged (too many misses from this account in the last hour, or an empty question). Nothing else changed.");
+      return text(`${r.repeat ? "logged again" : "logged"} as a miss in ${v.name}${r.redacted ? `; ${r.redacted} secret(s) redacted` : ""}`);
+    },
+  );
+
   // ---- projects ----
   server.registerTool(
     "projects",
@@ -832,10 +1000,7 @@ export function buildMcpServer(env: Env, who: McpIdentity): McpServer {
         path: z.string().optional().describe("Basic Memory's local folder for create; ignored (Cairn stores notes itself)"),
         set_default: z.boolean().optional(),
         since: sinceParam,
-        items: z
-          .union([z.array(z.enum(["note", "observation", "relation"])), z.number().int().positive().max(100)])
-          .optional()
-          .describe("What to return: notes (default), observations, relations. (A number is Cairn's older page_size.)"),
+        items: itemsParam,
         page: z.number().int().positive().optional(),
         page_size: z.number().int().min(1).max(100).optional(),
         output_format: outputFormat,
@@ -1181,6 +1346,12 @@ function formatHit(h: SearchHit & { project: string }, n: number, compact: boole
   ];
   if (compact) return lines[0];
   for (const m of h.matches) lines.push(`   ${m.context ? " " : ""}${m.line}${m.context ? "-" : ":"} ${m.text}`);
+  if (h.source_match) {
+    const s = h.source_match;
+    lines.push(
+      `   ${s.only ? "matched in the original text" : "also in the original text"}, ${s.at.slice(0, 10)}${s.label ? ` (${s.label})` : ""}${s.line ? `: ${s.line}` : ""}`,
+    );
+  }
   for (const o of h.observations) lines.push(`   [${o.category}] ${o.content}${o.context ? ` (${o.context})` : ""}`);
   if (h.outline) lines.push(`   outline: ${outlineLine(h.outline)}`);
   if (h.relations?.length) lines.push(`   links: ${h.relations.map((r) => `${r.type} [[${r.target}]]`).join(", ")}`);
