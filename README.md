@@ -20,7 +20,7 @@ notes database with good manners.)*
 ## Contents
 
 [Features](#features) · [Screenshots](#screenshots) · [Deploy your own](#deploy-your-own) ·
-[Connect Claude](#connect-claude-and-other-assistants) · [Sharing a project](#sharing-a-project) · [Deploy from GitHub Actions](#deploy-from-github-actions) ·
+[Connect Claude](#connect-claude-and-other-assistants) · [Files](#files) · [Sharing a project](#sharing-a-project) · [Deploy from GitHub Actions](#deploy-from-github-actions) ·
 [Costs and limits](#costs-and-limits) · [Security](#security) · [Backups and export](#backups-and-export) ·
 [Upgrading](#upgrading) · [Troubleshooting](#troubleshooting) · [Development](#development) ·
 [Licence](#licence)
@@ -47,7 +47,7 @@ these tools:
 | `projects` | List or create projects (up to 20 per person) |
 | `core_memory` | The always-loaded memory: an index note plus every `pinned: true` note, within a byte budget (also a prompt) |
 | `supersede` | Replace a fact without losing it: the old one moves under `## Superseded`, dated |
-| `attach_file` | Attach a file from a URL or base64 and embed it in a note |
+| `attach_file` | Attach a file (URL, base64 or an upload URL) to a note; Cairn reads its text |
 | `check_schema` | Validate notes against [Picoschema](https://github.com/basicmachines-co/basic-memory) schemas, infer one, or show drift (`SCHEMA_ENABLED`) |
 | `help` | The manual, generated from the tools' own schemas |
 
@@ -301,6 +301,25 @@ Set up Cairn for me: read https://cairn.example.com/setup.md and follow it.
 you'll use Cairn. Then it installs the matching skills from `/skills/` in the way that suits your
 client, or gives you the download links on claude.ai. Settings → Connected apps lists every grant
 with a revoke button.
+
+## Files
+
+Attach PDFs, images and text files to notes: drop or paste them into the editor, mail them to your
+inbox address, or have an assistant use `attach_file` (base64 up to 2 MB, or a one-time upload URL
+for files up to 10 MB). Cairn reads each file's text: a PDF's text page by page (through Workers
+AI's toMarkdown; up to 200 pages and 500 KB of text), what an image shows and every word in it
+(the vision model), a text file as is. Secrets are redacted. Search then finds a note through the
+files it links, below matches in the note itself, with the page: `from invoice.pdf, pages 1–4 …
+p. 3: Total due $1,240`. Scanned PDFs without a text layer are marked "no text" (a Worker can't
+render pages for OCR).
+
+Ask an assistant for the original and it gives you a download link that needs no sign-in, valid
+for an hour (`read_note file=<id>`); deleting the file kills the link. Each file's text state
+(read, pending, failed, no text) shows on the Files page and under the note, with the text itself
+behind a toggle and a "Read again" button. Files stored before this feature: the Files page offers
+"Read their text" to the project's owner, and a queue works through them every 15 minutes. Reading
+uses the owner's daily AI budget (`AI_DAILY_TOKENS`); when it runs out, files wait until the next
+day. The text counts toward storage with the file.
 
 ## Sharing a project
 

@@ -13,7 +13,7 @@
 // an object with the delete in flight. An account being deleted can't start uploads, and an upload
 // whose row was purged mid-flight deletes its own object.
 
-import type { Vault } from "../directory";
+import { type Vault, vaultRef } from "../directory";
 import { type Env, LIMITS } from "../env";
 import { spendAiBudget } from "../stats/budget";
 import { recordAi } from "../stats/record";
@@ -62,6 +62,14 @@ export interface AttachmentRow {
   state: "pending" | "ready" | "deleting";
   /** Set while an import that stored this file hasn't committed (see migrations/0014). */
   import_job?: string | null;
+  /** Reading the file's text (migrations/0020): null never tried, pending, done, failed, none. */
+  extract_state?: "pending" | "done" | "failed" | "none" | null;
+  extract_error?: string | null;
+  extract_after?: string | null;
+  extract_tries?: number;
+  extract_pages?: number | null;
+  extract_bytes?: number;
+  extract_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -72,6 +80,21 @@ export type PutResult =
 
 export function isInlineImage(mime: string): boolean {
   return mime in INLINE_IMAGES;
+}
+
+const TEXT_TYPES = new Set(["text/plain", "text/markdown", "text/csv", "application/json"]);
+
+/** How Cairn reads a file's text: a PDF through toMarkdown, an image through the vision model, a text file as is. */
+export function extractKind(mime: string): "pdf" | "image" | "text" | null {
+  if (mime === "application/pdf") return "pdf";
+  if (isInlineImage(mime)) return "image";
+  if (TEXT_TYPES.has(mime)) return "text";
+  return null;
+}
+
+/** The extraction state a newly stored file starts in. */
+export function initialExtract(mime: string): { state: "pending" | "none"; error: string | null } {
+  return extractKind(mime) ? { state: "pending", error: null } : { state: "none", error: "not a PDF, image or text file" };
 }
 
 const charge = (bytes: number) => bytes + ATTACHMENT_OVERHEAD;
@@ -173,10 +196,15 @@ async function claimPending(env: Env, id: string, olderThan?: string): Promise<A
 
 /** Drop a 'deleting' row and release its charge together, after its object is gone (idempotent). */
 async function settleDeleted(env: Env, row: Pick<AttachmentRow, "id" | "user_id" | "bytes">): Promise<void> {
+  // The file's kept text (extract_bytes, read from the row itself) is released with it.
   await env.DB.batch([
     env.DB.prepare(
-      "UPDATE users SET bytes_used = MAX(0, bytes_used - ?1) WHERE id = ?2 AND EXISTS (SELECT 1 FROM attachments WHERE id = ?3 AND state = 'deleting')",
+      "UPDATE users SET bytes_used = MAX(0, bytes_used - ?1 - COALESCE((SELECT extract_bytes FROM attachments WHERE id = ?3 AND state = 'deleting'), 0)) WHERE id = ?2 AND EXISTS (SELECT 1 FROM attachments WHERE id = ?3 AND state = 'deleting')",
     ).bind(charge(row.bytes), row.user_id, row.id),
+    env.DB.prepare("DELETE FROM attachment_texts WHERE attachment_id = ? AND EXISTS (SELECT 1 FROM attachments WHERE id = ? AND state = 'deleting')").bind(
+      row.id,
+      row.id,
+    ),
     env.DB.prepare("DELETE FROM attachments WHERE id = ? AND state = 'deleting'").bind(row.id),
   ]);
 }
@@ -269,8 +297,12 @@ export async function putAttachment(
     throw e;
   }
   const caption = input.caption !== false && isInlineImage(mime) ? await captionImage(env, owner, input.bytes, mime, name) : null;
-  const done = await env.DB.prepare("UPDATE attachments SET state = 'ready', caption = ?, updated_at = ? WHERE id = ? AND state = 'pending'")
-    .bind(caption, nowIso(), id)
+  // Its text is read afterwards (extractAttachment: right away by the caller, else the queue).
+  const ex = initialExtract(mime);
+  const done = await env.DB.prepare(
+    "UPDATE attachments SET state = 'ready', caption = ?, updated_at = ?, extract_state = ?, extract_error = ? WHERE id = ? AND state = 'pending'",
+  )
+    .bind(caption, nowIso(), ex.state, ex.error, id)
     .run();
   if (!done.meta.changes) {
     // The row was purged (account deletion) or claimed by the sweeper while we worked: our object
@@ -291,6 +323,13 @@ export async function putAttachment(
     source: input.source,
     state: "ready",
     import_job: input.importJob ?? null,
+    extract_state: ex.state,
+    extract_error: ex.error,
+    extract_after: null,
+    extract_tries: 0,
+    extract_pages: null,
+    extract_bytes: 0,
+    extract_at: null,
     created_at: ts,
     updated_at: ts,
   };
@@ -333,6 +372,10 @@ export async function deleteAttachment(env: Env, vault: Vault, id: string): Prom
     .bind(nowIso(), id, vault.id)
     .first<AttachmentRow>();
   if (!marked) return false;
+  // Its text leaves the notes that kept a copy (search, read_note) before the file goes.
+  await env.VAULT.getByName(vault.id)
+    .dropFileText(vaultRef(vault), id)
+    .catch(() => {});
   await finishDelete(env, marked).catch(() => {});
   return true;
 }
@@ -361,6 +404,10 @@ export async function releaseImportFiles(env: Env, vaultId: string, jobId: strin
       .bind(nowIso(), r.id, jobId)
       .first<AttachmentRow>();
     if (!claimed) continue;
+    if (claimed.extract_state === "done")
+      await env.VAULT.getByName(vaultId)
+        .dropFileText({ id: vaultId, name: "", ownerId: claimed.user_id }, claimed.id)
+        .catch(() => {});
     await finishDelete(env, claimed).catch(() => {}); // a failed R2 delete stays 'deleting' for the sweeper
     n++;
   }
@@ -464,7 +511,11 @@ export async function sweepAttachments(
  * object), then every R2 object under `<vaultId>/`, orphans included. Idempotent.
  */
 export async function purgeVaultAttachments(env: Env, vaultId: string): Promise<void> {
-  await env.DB.prepare("DELETE FROM attachments WHERE vault_id = ?").bind(vaultId).run();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM attachments WHERE vault_id = ?").bind(vaultId),
+    env.DB.prepare("DELETE FROM attachment_texts WHERE vault_id = ?").bind(vaultId),
+    env.DB.prepare("DELETE FROM upload_tickets WHERE vault_id = ?").bind(vaultId),
+  ]);
   if (env.FILES) {
     let cursor: string | undefined;
     do {
@@ -485,8 +536,26 @@ export async function describeAttachments(env: Env, vault: Vault, content: strin
       .all<AttachmentRow>()
   ).results;
   return rows.map(
-    (a) => `- ${a.name} (${a.mime}, ${Math.ceil(a.bytes / 1024)} KB)${a.caption ? `: ${a.caption}` : ""} — ${origin}${fileUrl(vault.name, a.id)}`,
+    (a) =>
+      `- ${a.name} (${a.mime}, ${Math.ceil(a.bytes / 1024)} KB)${a.caption ? `: ${a.caption}` : ""} — ${origin}${fileUrl(vault.name, a.id)}${extractNote(a)}`,
   );
+}
+
+/** " [text: …]" after a file in read_note: whether its text is searchable, and how to quote it or hand it over. */
+export function extractNote(a: Pick<AttachmentRow, "id" | "extract_state" | "extract_error" | "extract_pages">): string {
+  const more = `read_note file=${a.id}`;
+  switch (a.extract_state) {
+    case "done":
+      return ` [text searchable${a.extract_pages ? `, ${a.extract_pages} page${a.extract_pages === 1 ? "" : "s"}` : ""}; ${more} for its text or a link for the user]`;
+    case "pending":
+      return ` [text pending${a.extract_error ? ` (${a.extract_error})` : ""}; ${more} for a link for the user]`;
+    case "failed":
+      return ` [text failed: ${a.extract_error ?? "unknown error"}; ${more} for a link for the user]`;
+    case "none":
+      return ` [no text${a.extract_error ? ` (${a.extract_error})` : ""}; ${more} for a link for the user]`;
+    default:
+      return ` [${more} for a link for the user]`;
+  }
 }
 
 /** Attachment bytes for export (all of them, paginated), and a rewriter for links in notes `depth` folders deep. */

@@ -148,6 +148,14 @@ them verbatim as `source_text` (with `source_label`) on `write_note` / `edit_not
 stays the note; the original is kept beside it and searchable (`read_note sources=true` shows it).
 Never pass secrets.
 
+## Files
+
+A file (PDF, photo, screenshot, text file) goes in with `attach_file` (`note` to link it, or
+`title` for a new note). Cairn reads its text (PDF pages, text in images), so search finds the note
+through it: a hit labelled "from invoice.pdf … p. 3" came from the file. Quote a page with
+`read_note file=<id> page=3`. When the user asks for the original, `read_note file=<id>` gives a
+download link that needs no sign-in (valid an hour): give them that link.
+
 ## Never
 
 - Store secrets (passwords, tokens, keys, recovery codes) or another person's private data the

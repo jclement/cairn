@@ -156,9 +156,11 @@ also registers the bm_* names) on Cloudflare, multi-user, with these differences
 - Schemas: check_schema validates, infers and diffs Picoschema note schemas as Basic Memory does; a
   field may also be satisfied by a frontmatter key of the same name (Basic Memory reads only
   observations and relations), so status can live in frontmatter alone.
-- Not available: workspaces, binary file reads (files
-  are attachments: attach_file stores them and read_note lists their URLs), build_context note bodies
-  (read chosen notes with read_note).
+- Files are attachments: attach_file stores them (URL, base64 up to 2 MB, or an upload URL up to
+  10 MB) and Cairn reads their text (PDF pages, text in images, text files); search finds a note
+  through the files it links. read_note lists a note's files; read_note file=<id> (page=3) quotes
+  a file's text and gives a download link for the user that needs no sign-in (1 hour).
+- Not available: workspaces, build_context note bodies (read chosen notes with read_note).
 - Search: hybrid keyword + semantic fused by RRF and re-ranked by a small AI judge, which also
   says when nothing matches ("No note answers this directly").
 - Limits: 1 MB a note, 50 MB an account (history included), 60 writes a minute.

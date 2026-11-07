@@ -4,6 +4,8 @@
 import { ExternalTokenError, OAuthProvider, type OAuthProviderOptions } from "@cloudflare/workers-oauth-provider";
 import { createMcpHandler } from "agents/mcp/server";
 import { handleEmail } from "./capture/email";
+import { runExtractionQueue } from "./capture/extract";
+import { sweepUploadTickets } from "./capture/links";
 import { resolvePat, touchUser } from "./directory";
 import { type AuthProps, type Env, SCOPE_READ, SCOPE_WRITE } from "./env";
 import { buildMcpServer } from "./mcp/server";
@@ -12,6 +14,9 @@ import { resolveSite, withCanonical } from "./site";
 import { createApp } from "./web/app";
 
 export { VaultDO } from "./vault/do";
+
+/** The nightly maintenance trigger (wrangler.jsonc); any other cron only reads queued files. */
+export const NIGHTLY_CRON = "0 3 * * *";
 
 interface ApiCtx extends ExecutionContext {
   props: AuthProps;
@@ -156,9 +161,23 @@ export default {
     await handleEmail(message, await withCanonical(env));
   },
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    // Every 15 minutes: read queued files' text (uploads whose inline read didn't finish, backfills,
+    // files waiting for the next day's AI budget). The nightly run does that too, after its work.
+    if (controller.cron !== NIGHTLY_CRON) {
+      ctx.waitUntil(
+        withCanonical(env)
+          .then((e) => runExtractionQueue(e))
+          .then(() => undefined),
+      );
+      return;
+    }
     ctx.waitUntil(
       withCanonical(env)
-        .then((e) => recordNightly(e, new Date(controller.scheduledTime)))
+        .then(async (e) => {
+          await recordNightly(e, new Date(controller.scheduledTime));
+          await sweepUploadTickets(e).catch(() => 0);
+          await runExtractionQueue(e).catch(() => undefined);
+        })
         .then(() => undefined),
     );
   },

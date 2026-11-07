@@ -30,7 +30,9 @@ import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { parseJsonc } from "../scripts/lib/wrangler-config.mjs";
 import { newInboxKey } from "../src/capture/email";
+import { extractAttachment } from "../src/capture/extract";
 import { putAttachment } from "../src/capture/files";
+import { createUploadTicket, handleUpload } from "../src/capture/links";
 import {
   createInvite,
   createPat,
@@ -136,6 +138,17 @@ async function seed() {
 
   const att = await putAttachment(env, pv.vault as Vault, { bytes: enc(`file ${c("filebytes")}`), name: `${c("filename")}.txt`, source: "upload" });
   if (!att.ok) throw new Error(att.message);
+  // Its text read (attachment_texts, and a copy in A's note that links it), and an upload of A's
+  // waiting to be finished (upload_tickets 'uploaded'): neither may reach B.
+  if ((await extractAttachment(env, pv.vault as Vault, att.attachment.id)).state !== "done") throw new Error("seed file text failed");
+  const ticket = await createUploadTicket(env, a.user.id, pv.vault as Vault, { filename: "upload.txt" });
+  if (!ticket.ok) throw new Error(ticket.message);
+  const uploaded = await handleUpload(
+    env,
+    new Request(ticket.upload_url, { method: "PUT", body: enc(`uploaded ${c("filebytes")}`) }),
+    ticket.upload_url.split("/").pop() as string,
+  );
+  if (uploaded.status !== 201) throw new Error("seed upload failed");
 
   const jobId = crypto.randomUUID();
   await env.DB.prepare("INSERT INTO import_jobs (id, user_id, vault_id, status, staged_bytes, created_at) VALUES (?, ?, ?, 'staging', 0, ?)")
@@ -201,6 +214,7 @@ async function seed() {
     grantRead: grantIds[0],
     grantWrite: grantIds[1],
     miss: String(miss.id),
+    ticket: ticket.ref,
   };
   // Everything that must never reach B or an anonymous caller.
   const canaries = [
@@ -400,6 +414,13 @@ const ROUTES: Record<string, { public?: true; note?: string }> = {
   "POST /app/api/files/delete": {},
   "POST /app/files/delete": {},
   "GET /app/files": {},
+  "POST /app/files/extract": {},
+  "POST /app/files/backfill": { note: "owner only" },
+  "GET /files/s/:token": {
+    public: true,
+    note: "a signed download link is the credential (HMAC over vault, file and expiry); unknown, expired or cross-vault tokens are 404",
+  },
+  "PUT /files/upload/:token": { public: true, note: "a one-time upload URL is the credential (hashed, single use, 15 min); anything else is 404" },
   "GET /app/settings/capture": {},
   "POST /app/settings/capture/key": {},
   "POST /app/settings/capture/allow": {},
@@ -533,6 +554,8 @@ function fillPath(path: string, s: Seed): string {
         name: "cairn-notes",
         file: "index.json",
         code: s.revokedShareCode,
+        // Not A's live token (that is a bearer credential by design): a well-formed unknown one.
+        token: "A".repeat(43),
       };
       if (!(name in v)) throw new Error(`no value for route param :${name} in ${path}`);
       return encodeURIComponent(v[name]);
@@ -767,6 +790,22 @@ function controls(s: Seed): Control[] {
       },
     },
     {
+      key: "POST /app/files/extract",
+      build: (t, cookie) => ({ url: "/app/files/extract", init: form(cookie, { project: t.vault, id: t.att }) }),
+      effect: async (res, t) => {
+        const row = await env.DB.prepare("SELECT extract_state FROM attachments WHERE id = ?").bind(t.att).first<{ extract_state: string | null }>();
+        return status(res, 303) ?? (row?.extract_state ? null : "file not queued");
+      },
+    },
+    {
+      key: "POST /app/files/backfill",
+      build: (t, cookie) => ({ url: "/app/files/backfill", init: form(cookie, { project: t.vault }) }),
+      effect: async (res, t) => {
+        const row = await env.DB.prepare("SELECT extract_state FROM attachments WHERE id = ?").bind(t.att).first<{ extract_state: string | null }>();
+        return status(res, 303) ?? (row?.extract_state ? null : "file not queued");
+      },
+    },
+    {
       key: "POST /app/files/delete",
       build: (t, cookie) => ({ url: "/app/files/delete", init: form(cookie, { project: t.vault, id: t.att }) }),
       effect: async (res, t) => {
@@ -821,6 +860,8 @@ async function bTarget(s: Seed, cookie: string): Promise<Target> {
   if (!w2.ok) throw new Error(w2.message);
   const att = await putAttachment(env, v.vault as Vault, { bytes: enc(`control file ${title}`), name: "control.txt", source: "upload" });
   if (!att.ok) throw new Error(att.message);
+  // As if stored before files' text: the re-read and backfill controls must move it off NULL.
+  await env.DB.prepare("UPDATE attachments SET extract_state = NULL WHERE id = ?").bind(att.attachment.id).run();
   await createPat(env, s.b.user.id, `control ${title}`, ["memory:read"], null);
   const pat = (await listPats(env, s.b.user.id)).find((p) => p.name === `control ${title}`)?.id ?? "";
   // B's invite quota: retire the earlier controls' invites first.
@@ -1136,6 +1177,8 @@ describe("exhaustive isolation", () => {
           old: c("projobs"),
           new: "pwned",
           reason: "pwned",
+          file: s.ids.att,
+          ref: s.ids.ticket,
         };
         if (name in byName) return byName[name];
         if (p.type === "number" || p.type === "integer") return 1;
@@ -1165,6 +1208,10 @@ describe("exhaustive isolation", () => {
         ...(props.path ? [{ project: s.projName, path: "deep" }] : []),
         ...(props.note ? [{ project: s.projName, note: s.secretPermalink }, { note: memUrl }] : []),
         ...(props.name ? [{ name: s.projName }] : []),
+        // An attached file by id (read_note file=), and A's pending upload (attach_file ref=).
+        ...(props.file ? [{ project: s.projName, file: s.ids.att }, { file: s.ids.att }, { project: s.projName, file: s.ids.att, page: "1" }] : []),
+        ...(props.ref ? [{ project: s.projName, ref: s.ids.ticket }, { ref: s.ids.ticket }] : []),
+        ...(props.upload ? [{ project: s.projName, upload: true }] : []),
       ].filter((v) => Object.keys(v).every((k) => k in props));
       const writers = [
         { name: "4 B PAT", token: s.bPat },

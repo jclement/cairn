@@ -20,7 +20,7 @@ export async function bump(db: D1Database, userId: string, metrics: Record<strin
 export interface AiCall {
   userId: string;
   model: string;
-  purpose: "embed" | "query_embed" | "search_rerank" | "write_hints" | "garden_check" | "digest" | "caption" | "to_markdown";
+  purpose: "embed" | "query_embed" | "search_rerank" | "write_hints" | "garden_check" | "digest" | "caption" | "to_markdown" | "file_text";
   ok: boolean;
   latencyMs: number;
   inputTokens: number;

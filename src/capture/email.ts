@@ -16,6 +16,7 @@ import PostalMime, { type Attachment, type Email } from "postal-mime";
 import { type Vault, vaultRef, vaultStub } from "../directory";
 import type { Caller, Env } from "../env";
 import { bump } from "../stats/record";
+import { extractAttachment } from "./extract";
 import { putAttachment } from "./files";
 import { htmlToMarkdown } from "./html";
 
@@ -172,10 +173,12 @@ async function saveEmail(
 ): Promise<IngestOutcome> {
   const lines: string[] = [];
   let stored = 0;
+  const toRead: string[] = [];
   for (const a of email.attachments.slice(0, 20)) {
     const r = await storeAttachment(env, vault, a);
     if (r.ok) {
       stored++;
+      if (r.pending) toRead.push(r.id);
       lines.push(`- ${r.markdown}`);
     } else lines.push(`- ${a.filename ?? "attachment"} (not saved: ${r.message})`);
   }
@@ -209,6 +212,9 @@ async function saveEmail(
     .bind(result.value.note.permalink, who.userId, messageId.slice(0, 500))
     .run();
   await bump(env.DB, who.userId, { email_in: 1, email_attachments: stored }).catch(() => {});
+  // The attachments' text (PDF pages, what's in a photo), now that the note links them: the note gets
+  // it as original text. Whatever doesn't finish here (budget, time) the queue reads later.
+  for (const id of toRead) await extractAttachment(env, vault, id).catch(() => undefined);
   return { status: "saved", userId: who.userId, permalink: result.value.note.permalink, attachments: stored };
 }
 
@@ -220,7 +226,9 @@ async function storeAttachment(env: Env, vault: Vault, a: Attachment) {
         ? a.content
         : new Uint8Array(a.content as ArrayBuffer);
   const r = await putAttachment(env, vault, { bytes, name: a.filename ?? undefined, mime: a.mimeType, source: "email" });
-  return r.ok ? { ok: true as const, markdown: r.markdown } : { ok: false as const, message: r.message };
+  return r.ok
+    ? { ok: true as const, markdown: r.markdown, id: r.attachment.id, pending: r.created && r.attachment.extract_state === "pending" }
+    : { ok: false as const, message: r.message };
 }
 
 async function digest(raw: Uint8Array): Promise<string> {

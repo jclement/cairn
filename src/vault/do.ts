@@ -180,6 +180,12 @@ export const SOURCE_MAX_BYTES = 20 * 1024;
 export const SOURCE_LABEL_MAX = 200;
 /** Most source bytes read_note sources=true returns in one reply (newest first). */
 export const SOURCE_READ_MAX_BYTES = 100 * 1024;
+/** A page boundary in a file's text. */
+export const PAGE_MARK = /^<!-- page (\d+) -->$/;
+/** Most embedding chunks one file's text gets per note (the rest stays text-searchable). */
+export const FILE_CHUNKS_MAX = 400;
+/** Characters of a file's text read_note sources=true shows (the rest: read_note file=<id>). */
+export const FILE_SOURCE_PREVIEW = 1500;
 
 /** A write's source_text made safe to keep: secrets redacted, cut to SOURCE_MAX_BYTES. */
 export function prepareSource(text: string, label?: string): { text: string; label: string | null; redactions: number; kinds: string[]; cut: boolean } {
@@ -287,6 +293,8 @@ export interface SourceView {
   redactions: number;
   /** True when the original was longer than SOURCE_MAX_BYTES and was cut. */
   cut: boolean;
+  /** Set when the text was read out of an attached file (its attachment id). */
+  attachment_id?: string;
 }
 
 /** What happened to a write's source_text. */
@@ -408,7 +416,7 @@ export interface SearchHit {
   outline?: { entries: OutlineEntry[]; omitted: number };
   relations?: { type: string; target: string }[];
   /** Set when the query matched the note's kept original text (ranked below body matches). */
-  source_match?: { at: string; label: string | null; line: string | null; only: boolean };
+  source_match?: { at: string; label: string | null; line: string | null; only: boolean; file?: string; page?: number };
 }
 
 export interface SearchResult {
@@ -566,6 +574,9 @@ CREATE TABLE IF NOT EXISTS note_sources (
 );
 CREATE INDEX IF NOT EXISTS sources_note ON note_sources(note_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS sources_fts USING fts5(text, tokenize = 'porter unicode61 remove_diacritics 2');
+-- Which source chunks hold which file's text in which note (to remove them with the file).
+CREATE TABLE IF NOT EXISTS file_chunks (id TEXT PRIMARY KEY, attachment_id TEXT NOT NULL, note_id INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS file_chunks_att ON file_chunks(attachment_id, note_id);
 `;
 
 function now(): string {
@@ -680,6 +691,9 @@ export class VaultDO extends DurableObject<Env> {
       this.ensureColumn("observations", "time_kind", "TEXT");
       this.ensureColumn("observations", "t_start", "TEXT");
       this.ensureColumn("observations", "t_end", "TEXT");
+      // A file's text kept as a note's original text (src/capture/extract.ts): the attachment it came from.
+      this.ensureColumn("note_sources", "attachment_id", "TEXT");
+      this.sql.exec("CREATE INDEX IF NOT EXISTS sources_attachment ON note_sources(attachment_id) WHERE attachment_id IS NOT NULL");
       await this.scheduleGraphUpgrade();
       this.sql.exec("UPDATE notes SET uid = lower(hex(randomblob(16))) WHERE uid IS NULL");
       this.sql.exec("UPDATE revisions SET bytes = length(CAST(prior_content AS BLOB)) WHERE prior_content IS NOT NULL AND bytes = 0");
@@ -1262,7 +1276,7 @@ export class VaultDO extends DurableObject<Env> {
   }
 
   /** A note's kept original texts, newest first. */
-  private sourcesOf(noteId: number, limit = 1000): SourceView[] {
+  private sourcesOf(noteId: number, limit = 1000, opts: { files?: boolean } = {}): SourceView[] {
     return this.sql
       .exec<{
         id: number;
@@ -1273,9 +1287,164 @@ export class VaultDO extends DurableObject<Env> {
         username: string | null;
         redactions: number;
         cut: number;
-      }>("SELECT id, label, text, created_at, client, username, redactions, cut FROM note_sources WHERE note_id = ? ORDER BY id DESC LIMIT ?", noteId, limit)
+        attachment_id: string | null;
+      }>(
+        `SELECT id, label, text, created_at, client, username, redactions, cut, attachment_id FROM note_sources WHERE note_id = ?${opts.files === false ? " AND attachment_id IS NULL" : ""} ORDER BY id DESC LIMIT ?`,
+        noteId,
+        limit,
+      )
       .toArray()
-      .map((x) => ({ ...x, cut: !!x.cut }));
+      .map(({ attachment_id, ...x }) => ({ ...x, cut: !!x.cut, ...(attachment_id ? { attachment_id } : {}) }));
+  }
+
+  // ---------- files' text (src/capture/extract.ts) ----------
+  //
+  // A file's text (a PDF by page, an image's text and description) lives in D1 (attachment_texts,
+  // charged there with the file). Every note in this vault that links the file keeps a copy as one
+  // of its original texts (note_sources.attachment_id, bytes 0: not charged twice), so search finds
+  // the note through it, ranked below body matches. Copies are made when the text is read (for the
+  // notes linking the file then) and when a note starts linking a file whose text exists.
+
+  /** File ids linked from markdown (`/app/files/<project>/<id>`), any project segment. */
+  private static linkedFileIds(content: string): string[] {
+    return [...new Set([...content.matchAll(/\/app\/files\/[^/\s)"']+\/([a-z0-9]{12})/g)].map((m) => m[1]))].slice(0, 50);
+  }
+
+  /** Insert (or replace) note `noteId`'s copy of a file's text, with its FTS row and chunks. Inside a transaction. */
+  private putFileSourceSync(
+    noteId: number,
+    file: { attachment_id: string; label: string; text: string; redactions: number; cut: boolean },
+    chunkIds: string[],
+    chunks: string[],
+  ) {
+    this.removeFileSourceSync(noteId, file.attachment_id);
+    const sid = this.sql
+      .exec<{ id: number }>(
+        "INSERT INTO note_sources (note_id, label, text, bytes, redactions, cut, user_id, username, client, created_at, attachment_id) VALUES (?,?,?,0,?,?,NULL,NULL,'file',?,?) RETURNING id",
+        noteId,
+        file.label,
+        file.text,
+        file.redactions,
+        file.cut ? 1 : 0,
+        now(),
+        file.attachment_id,
+      )
+      .one().id;
+    this.sql.exec("INSERT INTO sources_fts (rowid, text) VALUES (?, ?)", sid, file.text);
+    chunks.forEach((text, i) => {
+      this.sql.exec("INSERT OR IGNORE INTO chunks (id, note_id, kind, text) VALUES (?,?,?,?)", chunkIds[i], noteId, "source", text);
+      // The same text re-read: the removal above queued this id's vector for deletion; keep it.
+      this.sql.exec("DELETE FROM vector_deletes WHERE id = ?", chunkIds[i]);
+      this.sql.exec("INSERT OR IGNORE INTO file_chunks (id, attachment_id, note_id) VALUES (?,?,?)", chunkIds[i], file.attachment_id, noteId);
+    });
+  }
+
+  /** Remove copies of a file's text (one note's, or every note's), their FTS rows and chunks. Inside a transaction. */
+  private removeFileSourceSync(noteId: number | null, attachmentId: string): number {
+    const rows = this.sql
+      .exec<{ id: number; note_id: number; text: string }>(
+        `SELECT id, note_id, text FROM note_sources WHERE attachment_id = ?${noteId === null ? "" : " AND note_id = ?"}`,
+        ...(noteId === null ? [attachmentId] : [attachmentId, noteId]),
+      )
+      .toArray();
+    for (const r of rows) {
+      this.sql.exec("DELETE FROM sources_fts WHERE rowid = ?", r.id);
+      this.sql.exec("DELETE FROM note_sources WHERE id = ?", r.id);
+      for (const c of this.sql
+        .exec<{ id: string }>(
+          "SELECT id FROM chunks WHERE note_id = ? AND kind = 'source' AND id IN (SELECT id FROM file_chunks WHERE attachment_id = ?)",
+          r.note_id,
+          attachmentId,
+        )
+        .toArray()) {
+        this.sql.exec("DELETE FROM chunks WHERE id = ?", c.id);
+        this.sql.exec("INSERT OR IGNORE INTO vector_deletes (id) VALUES (?)", c.id);
+      }
+      this.sql.exec("DELETE FROM file_chunks WHERE attachment_id = ? AND note_id = ?", attachmentId, r.note_id);
+    }
+    return rows.length;
+  }
+
+  /** Chunks of a file's text for one note (ids unique across the shared vector index), capped. */
+  private async fileChunks(ref: VaultRef, uid: string, title: string, attachmentId: string, text: string): Promise<{ ids: string[]; texts: string[] }> {
+    const texts = chunkNote(title, text.replace(/^<!-- page \d+ -->$/gm, ""))
+      .map((c) => c.text)
+      .slice(0, FILE_CHUNKS_MAX);
+    const ids = await Promise.all(texts.map((t, i) => sha256Hex(`${ref.id}\u0000${uid}\u0000file\u0000${attachmentId}\u0000${i}\u0000${t}`)));
+    return { ids, texts };
+  }
+
+  /**
+   * A file's text was read: copy it into every note of this vault that links the file (replacing an
+   * older copy). Returns the permalinks of those notes.
+   */
+  async fileText(_ref: VaultRef, file: { attachment_id: string; label: string; text: string; redactions: number; cut: boolean }): Promise<string[]> {
+    const ref = this.restoreRef();
+    if (!ref || this.purgeState() || !/^[a-z0-9]{12}$/.test(file.attachment_id)) return [];
+    const rows = this.sql
+      .exec<{ id: number; uid: string; title: string; permalink: string; content: string }>(
+        "SELECT id, uid, title, permalink, content FROM notes WHERE instr(content, ?) > 0 LIMIT 50",
+        `/${file.attachment_id}`,
+      )
+      .toArray()
+      .filter((r) => VaultDO.linkedFileIds(r.content).includes(file.attachment_id));
+    const out: string[] = [];
+    for (const r of rows) {
+      const ch = await this.fileChunks(ref, r.uid, r.title, file.attachment_id, file.text);
+      this.ctx.storage.transactionSync(() => {
+        if (!this.getRow(r.id)) return;
+        this.putFileSourceSync(r.id, file, ch.ids, ch.texts);
+      });
+      out.push(r.permalink);
+    }
+    if (out.length) await this.scheduleEmbedding();
+    return out;
+  }
+
+  /** The file was deleted (or re-read): its text leaves every note here. */
+  async dropFileText(_ref: VaultRef, attachmentId: string): Promise<number> {
+    if (!this.restoreRef() || this.purgeState()) return 0;
+    let n = 0;
+    this.ctx.storage.transactionSync(() => {
+      n = this.removeFileSourceSync(null, attachmentId);
+    });
+    if (n) await this.scheduleEmbedding();
+    return n;
+  }
+
+  /** After a write: copy in the text of files the note now links and doesn't hold yet (best effort). */
+  private async linkFilesIn(noteId: number, content: string): Promise<void> {
+    const ref = this.restoreRef();
+    if (!ref) return;
+    const ids = VaultDO.linkedFileIds(content);
+    if (!ids.length) return;
+    const have = new Set(
+      this.sql
+        .exec<{ a: string }>(`SELECT attachment_id AS a FROM note_sources WHERE note_id = ? AND attachment_id IS NOT NULL`, noteId)
+        .toArray()
+        .map((r) => r.a),
+    );
+    const want = ids.filter((id) => !have.has(id));
+    if (!want.length) return;
+    // Only this vault's files: a link to another project's file id never brings its text here.
+    const texts = (
+      await this.env.DB.prepare(
+        `SELECT t.attachment_id, t.label, t.text, t.redactions, t.cut FROM attachment_texts t JOIN attachments a ON a.id = t.attachment_id
+         WHERE t.vault_id = ?1 AND a.vault_id = ?1 AND a.state = 'ready' AND a.extract_state = 'done' AND t.attachment_id IN (${want.map((_, i) => `?${i + 2}`).join(",")})`,
+      )
+        .bind(ref.id, ...want)
+        .all<{ attachment_id: string; label: string; text: string; redactions: number; cut: number }>()
+    ).results;
+    if (!texts.length) return;
+    const row = this.getRow(noteId);
+    if (!row) return;
+    for (const t of texts) {
+      const ch = await this.fileChunks(ref, row.uid, row.title, t.attachment_id, t.text);
+      this.ctx.storage.transactionSync(() => {
+        if (!this.getRow(noteId)) return;
+        this.putFileSourceSync(noteId, { ...t, cut: !!t.cut }, ch.ids, ch.texts);
+      });
+    }
   }
 
   private sourceCount(noteId: number): number {
@@ -1648,6 +1817,8 @@ export class VaultDO extends DurableObject<Env> {
       ...(human ? {} : { [`client:${caller.client}`]: 1 }),
       [`type:${parsed.type}`]: existing ? 0 : 1,
     });
+    // Files the note now links whose text Cairn has read: copied in as original text (best effort).
+    await this.linkFilesIn(row.id, markdown).catch(() => {});
     await this.scheduleEmbedding();
     return ok({
       row,
@@ -2092,6 +2263,7 @@ export class VaultDO extends DurableObject<Env> {
           this.sql.exec("DELETE FROM sources_fts WHERE rowid = ?", x.id);
         const sourceBytes = this.sql.exec<{ b: number | null }>("SELECT SUM(bytes) AS b FROM note_sources WHERE note_id = ?", existing.id).one().b ?? 0;
         this.sql.exec("DELETE FROM note_sources WHERE note_id = ?", existing.id);
+        this.sql.exec("DELETE FROM file_chunks WHERE note_id = ?", existing.id);
         const del = this.sql
           .exec<{ id: number }>(
             `INSERT INTO revisions (note_id, permalink, title, action, prior_content, prior_checksum, checksum, user_id, username, client, tool, at, bytes, delta)
@@ -2719,7 +2891,15 @@ export class VaultDO extends DurableObject<Env> {
     if (args.sources) {
       sources = [];
       let used = 0;
-      for (const x of this.sourcesOf(row.id)) {
+      for (const s0 of this.sourcesOf(row.id)) {
+        // A file's text can be long: a preview here, the whole text (or a page) through read_note file=.
+        const x =
+          s0.attachment_id && s0.text.length > FILE_SOURCE_PREVIEW
+            ? {
+                ...s0,
+                text: `${s0.text.slice(0, FILE_SOURCE_PREVIEW)}\n[… ${Math.ceil((s0.text.length - FILE_SOURCE_PREVIEW) / 1024)} KB more: read_note file=${s0.attachment_id} (page= for one page)]`,
+              }
+            : s0;
         used += x.text.length;
         if (sources.length && used > SOURCE_READ_MAX_BYTES) break;
         sources.push(x);
@@ -4457,22 +4637,35 @@ export class VaultDO extends DurableObject<Env> {
       const ids = srcHits.get(row.id);
       if (!ids) return undefined;
       const x = this.sql
-        .exec<{ text: string; label: string | null; created_at: string }>(
+        .exec<{ text: string; label: string | null; created_at: string; attachment_id: string | null }>(
           ids.length
-            ? `SELECT text, label, created_at FROM note_sources WHERE id IN (${ids.map(() => "?").join(",")}) ORDER BY id DESC LIMIT 1`
-            : "SELECT text, label, created_at FROM note_sources WHERE note_id = ? ORDER BY id DESC LIMIT 1",
+            ? `SELECT text, label, created_at, attachment_id FROM note_sources WHERE id IN (${ids.map(() => "?").join(",")}) ORDER BY id DESC LIMIT 1`
+            : "SELECT text, label, created_at, attachment_id FROM note_sources WHERE note_id = ? ORDER BY id DESC LIMIT 1",
           ...(ids.length ? ids : [row.id]),
         )
         .toArray()[0];
       if (!x) return undefined;
-      const line = lowerTerms.length
-        ? (x.text
-            .split("\n")
-            .find((l) => lowerTerms.some((t) => l.toLowerCase().includes(t)))
-            ?.trim()
-            .slice(0, 240) ?? null)
-        : null;
-      return { at: x.created_at, label: x.label, line, only: !bodyHit.has(row.id) };
+      const all = x.text.split("\n");
+      const at = lowerTerms.length ? all.findIndex((l) => !PAGE_MARK.test(l) && lowerTerms.some((t) => l.toLowerCase().includes(t))) : -1;
+      const line = at >= 0 ? all[at].trim().slice(0, 240) : null;
+      if (!x.attachment_id) return { at: x.created_at, label: x.label, line, only: !bodyHit.has(row.id) };
+      // A file's text: which page the line is on (the last page marker above it), so answers can cite it.
+      let page: number | undefined;
+      for (let i = at; i >= 0; i--) {
+        const m = PAGE_MARK.exec(all[i]);
+        if (m) {
+          page = Number(m[1]);
+          break;
+        }
+      }
+      return {
+        at: x.created_at,
+        label: x.label,
+        line: line && page ? `p. ${page}: ${line}` : line,
+        only: !bodyHit.has(row.id),
+        file: x.attachment_id,
+        ...(page ? { page } : {}),
+      };
     };
 
     // Jev re-ranking of the top of the fused list (only when that window affects this page).
@@ -4919,7 +5112,7 @@ export class VaultDO extends DurableObject<Env> {
     this.bind(ref);
     return this.sql
       .exec<{ id: number; file_path: string; content: string; title: string; permalink: string; n: number }>(
-        "SELECT id, file_path, content, title, permalink, (SELECT COUNT(*) FROM note_sources s WHERE s.note_id = notes.id) AS n FROM notes ORDER BY file_path",
+        "SELECT id, file_path, content, title, permalink, (SELECT COUNT(*) FROM note_sources s WHERE s.note_id = notes.id AND s.attachment_id IS NULL) AS n FROM notes ORDER BY file_path",
       )
       .toArray()
       .map((r) => ({
@@ -4927,7 +5120,8 @@ export class VaultDO extends DurableObject<Env> {
         content: r.content,
         title: r.title,
         permalink: r.permalink,
-        ...(r.n ? { sources: sourcesMarkdown(r.title, r.permalink, this.sourcesOf(r.id)) } : {}),
+        // A file's text isn't exported: the file itself is (attachments/).
+        ...(r.n ? { sources: sourcesMarkdown(r.title, r.permalink, this.sourcesOf(r.id, 1000, { files: false })) } : {}),
       }));
   }
 

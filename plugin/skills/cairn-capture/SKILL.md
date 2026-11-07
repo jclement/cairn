@@ -35,6 +35,10 @@ email, a meeting snippet), pass those words verbatim as `source_text` on the `wr
 original is kept beside it, searchable, so a later question the summary dropped can still be
 answered. Never pass secrets in it (they are redacted anyway).
 
+**Files.** A PDF, photo or screenshot the user gives you: `attach_file` with `note` (or `title` for
+a new note); base64 up to 2 MB, or `upload=true` for an upload URL (PUT the bytes, then call again
+with `ref`). Cairn reads its text and the receipt says so; don't retype it into the note.
+
 ### Capturing a whole thread
 
 When the user asks to "capture this conversation" (or at the end of a long working session), write

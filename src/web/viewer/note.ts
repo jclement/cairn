@@ -2,13 +2,47 @@
 // outgoing links, backlinks, local graph, contents). Rendering is inert (see ../render.ts).
 
 import type { Context, Hono } from "hono";
+import { type AttachmentRow, fileUrl } from "../../capture/files";
 import { canWriteVault, getVault, vaultRef, vaultStub } from "../../directory";
+import type { SourceView } from "../../vault/do";
 import { folderHref, type H, html, icon, layout, noteHref, raw, when } from "../layout";
 import { type RenderInfo, renderMarkdown } from "../render";
 import { noteTools } from "../round3";
 import type { AppEnv } from "../types";
 import { clientBadge, emptyState, shellOpts } from "../ui";
 import { editUrl } from "./shared";
+
+const TEXT_STATE: Record<string, string> = { done: "text read", pending: "text pending", failed: "text failed", none: "no text" };
+/** Characters of a file's text the note page shows (the rest: the file itself, or read_note file=). */
+const VIEW_TEXT_MAX = 200_000;
+
+/** The files a note links: each with its text's state, a toggle to view the text, and a re-read button. */
+function noteFiles(project: string, permalink: string, files: AttachmentRow[], texts: Map<string, SourceView>, canWrite: boolean): H {
+  return html`<section class="note-files mt-8 rounded-2xl bg-sunken p-4 ring-1 ring-line" aria-label="Files">
+    <h2 class="m-0 text-sm font-semibold text-fg">Files <span class="count">${String(files.length)}</span></h2>
+    <ul class="m-0 mt-2 list-none p-0">${files.map((f) => {
+      const t = texts.get(f.id);
+      const state = f.extract_state ? (TEXT_STATE[f.extract_state] ?? f.extract_state) : "text not read yet";
+      return html`<li class="mt-3">
+        <p class="m-0 flex flex-wrap items-center gap-2 text-sm"><a class="inline-flex items-center gap-2 font-medium" href="${fileUrl(project, f.id)}">${icon("file", "size-4 shrink-0 text-muted")}${f.name}</a>
+          <span class="text-xs text-muted">${f.mime} · ${String(Math.ceil(f.bytes / 1024))} KB</span>
+          <span class="badge" data-extract="${f.extract_state ?? "never"}">${state}${f.extract_state === "done" && f.extract_pages ? html` · ${String(f.extract_pages)} p.` : ""}</span>
+          ${
+            canWrite && f.extract_state !== "done" && f.extract_state !== "pending"
+              ? html`<form method="post" action="/app/files/extract" class="inline"><input type="hidden" name="project" value="${project}"><input type="hidden" name="id" value="${f.id}"><input type="hidden" name="back" value="${noteHref(project, permalink)}"><button class="btn btn-ghost btn-sm" type="submit">${icon("history", "size-4")}Read text again</button></form>`
+              : ""
+          }</p>
+        ${f.extract_error && f.extract_state !== "done" ? html`<p class="m-0 mt-1 text-xs text-muted">${f.extract_error}</p>` : ""}
+        ${
+          t
+            ? html`<details class="mt-1"><summary class="cursor-pointer text-xs text-muted">View extracted text (${t.label ?? "from the file"}${t.redactions ? `; ${t.redactions} secret(s) redacted` : ""})</summary>
+              <pre class="m-0 mt-1 max-h-96 overflow-auto rounded-xl bg-surface p-3 text-sm whitespace-pre-wrap break-words">${t.text.length > VIEW_TEXT_MAX ? `${t.text.slice(0, VIEW_TEXT_MAX)}\n[… cut here]` : t.text}</pre></details>`
+            : ""
+        }
+      </li>`;
+    })}</ul>
+  </section>`;
+}
 
 type C = Context<AppEnv>;
 
@@ -53,7 +87,18 @@ export function registerNotePage(app: Hono<AppEnv>) {
         404,
       );
     }
-    const { note, content, observations, relations, backlinks, links, sources } = r.value;
+    const { note, content, observations, relations, backlinks, links } = r.value;
+    // Original text the note was written from, apart from files' text (shown with the files below).
+    const sources = r.value.sources.filter((x) => !x.attachment_id);
+    const fileTexts = new Map(r.value.sources.filter((x) => x.attachment_id).map((x) => [x.attachment_id as string, x]));
+    const fileIds = [...new Set([...content.matchAll(/\/app\/files\/[^/\s)"']+\/([a-z0-9]{12})/g)].map((m) => m[1]))].slice(0, 50);
+    const files = fileIds.length
+      ? (
+          await c.env.DB.prepare(`SELECT * FROM attachments WHERE vault_id = ? AND state = 'ready' AND id IN (${fileIds.map(() => "?").join(",")})`)
+            .bind(v.id, ...fileIds)
+            .all<AttachmentRow>()
+        ).results
+      : [];
     const revs = await stub.revisions(vaultRef(v), note.permalink);
     const info: RenderInfo = { mermaid: false, headings: [] };
     const bodyHtml = renderMarkdown(content, { vault: v.name, links }, info);
@@ -100,6 +145,7 @@ export function registerNotePage(app: Hono<AppEnv>) {
                 </details>`
                 : ""
             }
+            ${files.length ? noteFiles(v.name, note.permalink, files, fileTexts, canWriteVault(v)) : ""}
           </article>
           <div class="note-side" role="complementary" aria-label="About this note">
             ${

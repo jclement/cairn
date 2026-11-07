@@ -21,8 +21,9 @@
   // e.g. [{ "pattern": "cairn.example.com", "custom_domain": true }] (its zone must be on the account).
   "routes": [],
   "observability": { "enabled": true },
-  // Nightly memory maintenance: expiries, gardening reports, Monday digests (src/memory/cron.ts).
-  "triggers": { "crons": ["0 3 * * *"] },
+  // Nightly memory maintenance: expiries, gardening reports, Monday digests (src/memory/cron.ts);
+  // every 15 minutes: read queued files' text (src/capture/extract.ts).
+  "triggers": { "crons": ["0 3 * * *", "*/15 * * * *"] },
   // Static files (marketing site + app CSS/JS). The Worker runs first for its own routes;
   // everything else is served from public/ by the asset worker.
   "assets": {
@@ -31,7 +32,7 @@
     "run_worker_first": [
       "/", "/connect", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*", "/authorize",
       "/app", "/app/*", "!/app/owg/*", "!/app/cairn/*", "!/app/dist/*", "!/app/viewer/*", "!/app/ui/*", "!/app/fonts/*",
-      "/signup", "/login", "/recover", "/auth/*", "/export", "/export/*", "/health", "/setup.md", "/skills/*", "/claim", "/claim/*"
+      "/signup", "/login", "/recover", "/auth/*", "/export", "/export/*", "/health", "/setup.md", "/skills/*", "/claim", "/claim/*", "/files/*"
     ]
   },
   "vars": {
@@ -79,14 +80,14 @@
       // to "cairn-owg", a new Worker with no access to the existing Durable Objects (the vaults).
       "name": "cairn",
       "routes": [{ "pattern": "cairn.onewheelgeek.net", "custom_domain": true }],
-      "triggers": { "crons": ["0 3 * * *"] },
+      "triggers": { "crons": ["0 3 * * *", "*/15 * * * *"] },
       "assets": {
         "directory": "./public",
         "binding": "ASSETS",
         "run_worker_first": [
           "/", "/connect", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*", "/authorize",
           "/app", "/app/*", "!/app/owg/*", "!/app/cairn/*", "!/app/dist/*", "!/app/viewer/*", "!/app/ui/*", "!/app/fonts/*",
-          "/signup", "/login", "/recover", "/auth/*", "/export", "/export/*", "/health", "/setup.md", "/skills/*", "/claim", "/claim/*"
+          "/signup", "/login", "/recover", "/auth/*", "/export", "/export/*", "/health", "/setup.md", "/skills/*", "/claim", "/claim/*", "/files/*"
         ]
       },
       "vars": {
@@ -99,7 +100,8 @@
         "IMPORT_ENABLED": "true",
         "SCHEMA_ENABLED": "true",
         "BM_COMPAT": "false",
-        "AI_DAILY_TOKENS": "1000000",
+        // Private-ish instance: generous, so files' text (PDF pages, image reading) fits in a day.
+        "AI_DAILY_TOKENS": "20000000",
         "DIGEST_MODEL": "@cf/google/gemma-4-26b-a4b-it",
         // Email capture: Email Routing rule for this address -> this Worker (see README "Capture").
         "INBOUND_EMAIL_ADDRESS": "cairn@onewheelgeek.net"
@@ -140,7 +142,7 @@
         "run_worker_first": [
           "/", "/connect", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*", "/authorize",
           "/app", "/app/*", "!/app/owg/*", "!/app/cairn/*", "!/app/dist/*", "!/app/viewer/*", "!/app/ui/*", "!/app/fonts/*",
-          "/signup", "/login", "/recover", "/auth/*", "/export", "/export/*", "/health", "/setup.md", "/skills/*", "/claim", "/claim/*"
+          "/signup", "/login", "/recover", "/auth/*", "/export", "/export/*", "/health", "/setup.md", "/skills/*", "/claim", "/claim/*", "/files/*"
         ]
       },
       "vars": {

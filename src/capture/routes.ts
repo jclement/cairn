@@ -3,7 +3,7 @@
 // Mounted inside createApp(), so the session, CSRF (Origin) and recovery-session middleware apply.
 
 import type { Context, Hono } from "hono";
-import { canWriteVault, listVaults, type User, type Vault, vaultRef, vaultStub } from "../directory";
+import { canWriteVault, isOwner, listVaults, type User, type Vault, vaultRef, vaultStub } from "../directory";
 import { publicOrigin } from "../env";
 import { importEnabled } from "../web/importer";
 import { type H, html, icon, layout, noteHref, raw, when } from "../web/layout";
@@ -11,11 +11,23 @@ import { renderMarkdown } from "../web/render";
 import type { AppEnv } from "../web/types";
 import { emptyState, pageHeader, panel, settingsLayout, shellOpts } from "../web/ui";
 import { newInboxKey } from "./email";
+import { extractAttachment, extractionCounts, queueBackfill, retryExtraction, runExtractionQueue } from "./extract";
 import { safeFetch } from "./fetch";
-import { deleteAttachment, getAttachment, isInlineImage, listAttachments, MAX_ATTACHMENT_BYTES, putAttachment } from "./files";
+import { type AttachmentRow, deleteAttachment, getAttachment, isInlineImage, listAttachments, MAX_ATTACHMENT_BYTES, putAttachment } from "./files";
 import { aiToMarkdown, extractMain, htmlTitle, htmlToMarkdown } from "./html";
+import { handleUpload, resolveSignedLink } from "./links";
 
 type C = Context<AppEnv>;
+
+/** Run `p` after the response when the runtime allows (waitUntil), else before it. */
+function background(c: C, p: Promise<unknown>): void {
+  const q = p.catch(() => undefined);
+  try {
+    c.executionCtx.waitUntil(q);
+  } catch {
+    // No execution context (tests calling app.request): the promise still runs; nothing awaits it.
+  }
+}
 const MAX_CLIP_CHARS = 200_000;
 
 export function registerCapture(app: Hono<AppEnv>) {
@@ -44,21 +56,19 @@ export function registerCapture(app: Hono<AppEnv>) {
 
   // ---------------------------------------------------------------- serve
 
-  app.get("/app/files/:project/:id", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.text("Not found", 404);
-    const { vault } = await pickVault(c, user, decodeURIComponent(c.req.param("project")));
-    const row = vault ? await getAttachment(c.env, vault, c.req.param("id")) : null;
+  async function serveFile(c: C, row: AttachmentRow | null, signed: boolean): Promise<Response> {
     if (!row || !c.env.FILES) return c.text("Not found", 404);
     const etag = `"${row.sha256}"`;
     const common: Record<string, string> = {
       ETag: etag,
-      "Cache-Control": "private, max-age=31536000, immutable",
+      // A signed link is a bearer credential with an expiry: nothing may keep the file past it.
+      "Cache-Control": signed ? "private, no-store" : "private, max-age=31536000, immutable",
       "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox",
       "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
       Vary: "Cookie",
     };
-    if (c.req.header("if-none-match") === etag) return new Response(null, { status: 304, headers: common });
+    if (!signed && c.req.header("if-none-match") === etag) return new Response(null, { status: 304, headers: common });
     const obj = await c.env.FILES.get(row.r2_key);
     if (!obj) return c.text("Not found", 404);
     const inline = isInlineImage(row.mime);
@@ -71,7 +81,20 @@ export function registerCapture(app: Hono<AppEnv>) {
         "Content-Length": String(row.bytes),
       },
     });
+  }
+
+  app.get("/app/files/:project/:id", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.text("Not found", 404);
+    const { vault } = await pickVault(c, user, decodeURIComponent(c.req.param("project")));
+    return serveFile(c, vault ? await getAttachment(c.env, vault, c.req.param("id")) : null, false);
   });
+
+  // A signed, expiring link an agent hands the user (read_note file=…): no sign-in. Dies with the file.
+  app.get("/files/s/:token", async (c) => serveFile(c, await resolveSignedLink(c.env, c.req.param("token")), true));
+
+  // One-time upload URL from attach_file upload=true: the token is the credential (no session, no CSRF: PUT).
+  app.put("/files/upload/:token", (c) => handleUpload(c.env, c.req.raw, c.req.param("token")));
 
   // ---------------------------------------------------------------- upload / delete
 
@@ -100,8 +123,20 @@ export function registerCapture(app: Hono<AppEnv>) {
         r.code === "TOO_LARGE" || r.code === "QUOTA" ? 413 : r.code === "UNAVAILABLE" ? 503 : r.code === "BUSY" ? 409 : 400,
       );
     const a = r.attachment;
+    // Read its text after answering (the editor needs the link now); the queue retries what doesn't finish.
+    if (r.created && a.extract_state === "pending") background(c, extractAttachment(c.env, vault, a.id));
     return c.json(
-      { id: a.id, url: r.url, markdown: r.markdown, name: a.name, mime: a.mime, bytes: a.bytes, caption: a.caption, created: r.created },
+      {
+        id: a.id,
+        url: r.url,
+        markdown: r.markdown,
+        name: a.name,
+        mime: a.mime,
+        bytes: a.bytes,
+        caption: a.caption,
+        created: r.created,
+        extract_state: a.extract_state ?? null,
+      },
       r.created ? 201 : 200,
     );
   });
@@ -126,6 +161,37 @@ export function registerCapture(app: Hono<AppEnv>) {
     return c.redirect(`/app/files?project=${encodeURIComponent(project)}`, 303);
   });
 
+  // ---------------------------------------------------------------- files' text: re-read one, backfill a project
+
+  const backTo = (back: string, fallback: string) => (/^\/app\/[^\s\\]*$/.test(back) && !back.startsWith("//") ? back : fallback);
+  app.post("/app/files/extract", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.redirect("/login", 303);
+    const f = await c.req.formData();
+    const project = String(f.get("project") ?? "");
+    const id = String(f.get("id") ?? "");
+    const { vault } = await pickWritable(c, user, project || undefined);
+    const fallback = `/app/files?project=${encodeURIComponent(project)}`;
+    if (!vault) return c.redirect(fallback, 303);
+    if (await writeLimited(c, user)) return c.text("Too many writes. Wait a minute.", 429);
+    if (await retryExtraction(c.env, vault, id)) background(c, extractAttachment(c.env, vault, id));
+    return c.redirect(backTo(String(f.get("back") ?? ""), fallback), 303);
+  });
+  app.post("/app/files/backfill", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.redirect("/login", 303);
+    const f = await c.req.formData();
+    const project = String(f.get("project") ?? "");
+    const { vault } = await pickVault(c, user, project || undefined);
+    const fallback = `/app/files?project=${encodeURIComponent(project)}`;
+    // The owner's call: it spends their AI budget on every file the project holds.
+    if (!vault || !isOwner(vault)) return c.redirect(fallback, 303);
+    const q = await queueBackfill(c.env, vault);
+    // A first batch now; the 15-minute queue reads the rest.
+    if (q.queued) background(c, runExtractionQueue(c.env, { vaultId: vault.id, limit: 3 }));
+    return c.redirect(`${fallback}&queued=${q.queued}`, 303);
+  });
+
   // ---------------------------------------------------------------- files page
 
   app.get("/app/files", async (c) => {
@@ -135,6 +201,25 @@ export function registerCapture(app: Hono<AppEnv>) {
     if (!v) return c.html(page(c, "Files", html`${pageHeader("Files")}<p class="callout warning">No such project.</p>`), 404);
     const rows = await listAttachments(c.env, v);
     const total = rows.reduce((n, r) => n + r.bytes, 0);
+    const counts = await extractionCounts(c.env, v);
+    const queued = c.req.query("queued");
+    const textCell = (r: AttachmentRow) => {
+      const label =
+        r.extract_state === "done"
+          ? `read${r.extract_pages ? ` · ${r.extract_pages} p.` : ""}`
+          : r.extract_state === "pending"
+            ? "pending"
+            : r.extract_state === "failed"
+              ? "failed"
+              : r.extract_state === "none"
+                ? "none"
+                : "not read";
+      const again =
+        canWriteVault(v) && (r.extract_state === "failed" || r.extract_state === "none" || !r.extract_state)
+          ? html`<form method="post" action="/app/files/extract" class="inline"><input type="hidden" name="project" value="${v.name}"><input type="hidden" name="id" value="${r.id}"><button class="btn btn-ghost btn-sm" type="submit">Read again</button></form>`
+          : "";
+      return html`<span class="badge" data-extract="${r.extract_state ?? "never"}">${label}</span>${r.extract_error && r.extract_state !== "done" ? html`<br><span class="muted small">${r.extract_error}</span>` : ""}${again}`;
+    };
     return c.html(
       page(
         c,
@@ -147,12 +232,21 @@ export function registerCapture(app: Hono<AppEnv>) {
           )}</select></label><noscript><button class="btn btn-secondary btn-sm" type="submit">Go</button></noscript></form>`,
         )}
         ${!c.env.FILES ? html`<p class="callout warning">Attachments are not configured on this server (no <code>FILES</code> R2 binding).</p>` : ""}
+        ${queued !== undefined ? html`<p class="callout">Queued ${queued} file(s) to have their text read; Cairn works through them every 15 minutes.</p>` : ""}
+        ${
+          counts.never && isOwner(v)
+            ? html`<form method="post" action="/app/files/backfill" class="callout flex flex-wrap items-center gap-3"><input type="hidden" name="project" value="${v.name}">
+              <span>${String(counts.never)} file(s) were stored before Cairn read files' text. Read them now so search finds what's inside (PDF pages, text in images; uses your daily AI budget).</span>
+              <button class="btn btn-secondary btn-sm" type="submit">Read their text</button></form>`
+            : ""
+        }
+        ${counts.pending ? html`<p class="muted small">${String(counts.pending)} file(s) waiting to have their text read.</p>` : ""}
         ${
           rows.length
-            ? html`<table class="files"><thead><tr><th>File</th><th>Type</th><th>Size</th><th>Added</th><th></th></tr></thead><tbody>${rows.map(
+            ? html`<table class="files"><thead><tr><th>File</th><th>Type</th><th>Size</th><th>Added</th><th>Text</th><th></th></tr></thead><tbody>${rows.map(
                 (r) => html`<tr>
                   <td><a class="inline-flex items-center gap-2 font-medium" href="/app/files/${encodeURIComponent(v.name)}/${r.id}">${icon("file", "size-4 shrink-0 text-muted")}${r.name}</a>${r.caption ? html`<br><span class="muted small">${r.caption}</span>` : ""}</td>
-                  <td class="small">${r.mime}</td><td class="small">${Math.ceil(r.bytes / 1024)} KB</td><td class="small">${when(r.created_at)} · ${r.source}</td>
+                  <td class="small">${r.mime}</td><td class="small">${Math.ceil(r.bytes / 1024)} KB</td><td class="small">${when(r.created_at)} · ${r.source}</td><td class="small">${textCell(r)}</td>
                   <td>${
                     canWriteVault(v)
                       ? html`<form method="post" action="/app/files/delete" class="inline"><input type="hidden" name="project" value="${v.name}"><input type="hidden" name="id" value="${r.id}">

@@ -146,6 +146,18 @@ describe("capture: email", () => {
   });
 });
 
+/** A file's text bytes once its read (after the upload's response) has finished. */
+async function settledTextBytes(id: string): Promise<number> {
+  for (let i = 0; i < 100; i++) {
+    const r = await env.DB.prepare("SELECT extract_state, extract_bytes FROM attachments WHERE id = ?")
+      .bind(id)
+      .first<{ extract_state: string; extract_bytes: number }>();
+    if (r && r.extract_state !== "pending") return r.extract_bytes;
+    await new Promise((res) => setTimeout(res, 50));
+  }
+  throw new Error("file text never settled");
+}
+
 describe("capture: attachments", () => {
   it("uploads, serves only to the owner, dedupes, charges and releases quota", async () => {
     const a = await makeUser("own");
@@ -156,11 +168,13 @@ describe("capture: attachments", () => {
     const j = (await up.json()) as { id: string; url: string; markdown: string; mime: string; caption: string };
     expect(j.mime).toBe("image/png");
     expect(j.markdown).toBe(`![An image named dot.png.](${j.url})`);
-    expect(await bytesUsed(a.user.id)).toBe(before + PNG.byteLength + ATTACHMENT_OVERHEAD);
+    // Its text is read after the response and charged with the file: wait for that to settle.
+    const textBytes = await settledTextBytes(j.id);
+    expect(await bytesUsed(a.user.id)).toBe(before + PNG.byteLength + ATTACHMENT_OVERHEAD + textBytes);
     const again = await upload(a.cookie, PNG, "copy.png", "image/png");
     expect(again.status).toBe(200);
     expect(((await again.json()) as { id: string }).id).toBe(j.id);
-    expect(await bytesUsed(a.user.id)).toBe(before + PNG.byteLength + ATTACHMENT_OVERHEAD);
+    expect(await bytesUsed(a.user.id)).toBe(before + PNG.byteLength + ATTACHMENT_OVERHEAD + textBytes);
 
     const got = await fetchWorker(j.url, { headers: { cookie: a.cookie } });
     expect(got.status).toBe(200);
