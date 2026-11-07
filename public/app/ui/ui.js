@@ -81,7 +81,7 @@
       b.hidden = false;
       b.addEventListener("click", async () => {
         const el = document.getElementById(b.getAttribute("data-copy-from"));
-        const label = b.textContent;
+        const label = b.innerHTML;
         try {
           await navigator.clipboard.writeText(el.textContent.trim());
           b.textContent = "Copied";
@@ -89,8 +89,39 @@
           b.textContent = "Copy failed";
         }
         setTimeout(() => {
-          b.textContent = label;
+          b.innerHTML = label;
         }, 1600);
+      });
+    }
+    // Click-to-copy text (an email address, a key): data-click-copy on the element itself.
+    for (const el of document.querySelectorAll("[data-click-copy]")) {
+      if (!navigator.clipboard) continue;
+      el.setAttribute("role", "button");
+      el.setAttribute("tabindex", "0");
+      el.title = "Click to copy";
+      el.style.cursor = "pointer";
+      const copy = async () => {
+        if (el.dataset.copying) return;
+        const text = el.getAttribute("data-click-copy") || el.textContent.trim();
+        const label = el.textContent;
+        el.dataset.copying = "1";
+        try {
+          await navigator.clipboard.writeText(text);
+          el.textContent = "Copied";
+        } catch {
+          el.textContent = "Copy failed";
+        }
+        setTimeout(() => {
+          el.textContent = label;
+          delete el.dataset.copying;
+        }, 1200);
+      };
+      el.addEventListener("click", copy);
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          copy();
+        }
       });
     }
     for (const b of document.querySelectorAll("[data-download-from]")) {

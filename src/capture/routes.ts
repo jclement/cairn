@@ -290,17 +290,17 @@ export function registerCapture(app: Hono<AppEnv>) {
             !inbound
               ? html`<p class="callout warning m-0">Email capture is off on this server (set <code>INBOUND_EMAIL_ADDRESS</code> and an Email Routing rule).</p>`
               : key
-                ? html`<p class="mt-0">Mail becomes a note in your default project's <code>inbox/</code> folder; attachments are saved as files. Use any of:</p>
+                ? html`<p class="mt-0">Mail becomes a note in your default project's <code>inbox/</code> folder; attachments are saved as files. Use any of (click an address to copy it):</p>
                   <ol class="ml-5 list-decimal space-y-1.5 text-sm">
-                    <li>Send to <code class="copy">${local}+${key}@${domain}</code> <span class="muted small">(needs subaddressing on the mail domain)</span></li>
-                    <li>Send to <code>${inbound}</code> with the subject starting <code>[k:${key}]</code></li>
-                    <li>Send to <code>${inbound}</code> from an address on your allowlist below (it must pass DMARC or DKIM)</li>
+                    <li>Send to <code data-click-copy>${local}+${key}@${domain}</code> <span class="muted small">(needs subaddressing on the mail domain)</span></li>
+                    <li>Send to <code data-click-copy>${inbound}</code> with the subject starting <code data-click-copy>[k:${key}]</code></li>
+                    <li>Send to <code data-click-copy>${inbound}</code> from an address on your allowlist below (it must pass DMARC or DKIM)</li>
                   </ol>
                   <div class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-sunken px-4 py-3">
                     <p class="m-0 text-xs text-muted">Your key is a password for your inbox: anyone with it can add notes. Rotate it if it leaks.</p>
                     <form method="post" action="/app/settings/capture/key" class="m-0"><button class="btn btn-secondary btn-sm" type="submit">${icon("key", "size-4")}Rotate key</button></form>
                   </div>`
-                : html`<form method="post" action="/app/settings/capture/key" class="m-0"><p class="mt-0">Create your private inbox key to start emailing notes to <code>${inbound}</code>.</p><button class="btn btn-primary" type="submit">Create inbox key</button></form>`
+                : html`<form method="post" action="/app/settings/capture/key" class="m-0"><p class="mt-0">Create your private inbox key to start emailing notes to <code data-click-copy>${inbound}</code>.</p><button class="btn btn-primary" type="submit">Create inbox key</button></form>`
           }
           ${
             inbound
